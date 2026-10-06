@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -11,7 +14,85 @@ import {
   Users,
 } from "lucide-react";
 
+interface DashboardStatistics {
+  totalRestaurants: number;
+  activeRestaurants: number;
+  suspendedRestaurants: number;
+  totalRestaurantOwners: number;
+  applications: {
+    pending: number;
+    approved: number;
+    rejected: number;
+  };
+}
+
 export default function SuperAdminPage() {
+  const [statistics, setStatistics] =
+    useState<DashboardStatistics | null>(null);
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    async function loadDashboard() {
+      try {
+        setLoading(true);
+        setError("");
+
+        const response = await fetch(
+          "/api/super-admin/dashboard",
+          {
+            method: "GET",
+            cache: "no-store",
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(
+            data.message || "Failed to load dashboard."
+          );
+        }
+
+        setStatistics(data.statistics);
+      } catch (error) {
+        console.error("Dashboard loading error:", error);
+
+        setError(
+          error instanceof Error
+            ? error.message
+            : "Failed to load dashboard."
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadDashboard();
+  }, []);
+
+  const totalRestaurants =
+    statistics?.totalRestaurants ?? 0;
+
+  const activeRestaurants =
+    statistics?.activeRestaurants ?? 0;
+
+  const suspendedRestaurants =
+    statistics?.suspendedRestaurants ?? 0;
+
+  const totalRestaurantOwners =
+    statistics?.totalRestaurantOwners ?? 0;
+
+  const pendingApplications =
+    statistics?.applications.pending ?? 0;
+
+  const approvedApplications =
+    statistics?.applications.approved ?? 0;
+
+  const rejectedApplications =
+    statistics?.applications.rejected ?? 0;
+
   return (
     <div className="px-4 py-8 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
@@ -31,25 +112,48 @@ export default function SuperAdminPage() {
           </p>
         </div>
 
+        {/* Error */}
+        {error && (
+          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4">
+            <p className="text-sm font-semibold text-red-700">
+              Unable to load dashboard
+            </p>
+
+            <p className="mt-1 text-sm text-red-600">
+              {error}
+            </p>
+          </div>
+        )}
+
         {/* Main stats */}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             title="Total Restaurants"
-            value="1"
-            description="Active restaurants"
+            value={
+              loading ? "—" : totalRestaurants.toString()
+            }
+            description="Registered restaurants"
             icon={Store}
           />
 
           <StatCard
             title="Pending Applications"
-            value="0"
+            value={
+              loading
+                ? "—"
+                : pendingApplications.toString()
+            }
             description="Awaiting review"
             icon={Clock3}
           />
 
           <StatCard
             title="Restaurant Owners"
-            value="1"
+            value={
+              loading
+                ? "—"
+                : totalRestaurantOwners.toString()
+            }
             description="Registered owners"
             icon={Users}
           />
@@ -66,13 +170,21 @@ export default function SuperAdminPage() {
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <SmallStat
             title="Active Restaurants"
-            value="1"
+            value={
+              loading
+                ? "—"
+                : activeRestaurants.toString()
+            }
             icon={CheckCircle2}
           />
 
           <SmallStat
             title="Suspended"
-            value="0"
+            value={
+              loading
+                ? "—"
+                : suspendedRestaurants.toString()
+            }
             icon={Building2}
           />
 
@@ -89,7 +201,7 @@ export default function SuperAdminPage() {
           />
         </div>
 
-        {/* Main content */}
+        {/* Application summary */}
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           {/* Applications */}
           <div className="rounded-2xl border border-slate-200 bg-white lg:col-span-2">
@@ -113,7 +225,42 @@ export default function SuperAdminPage() {
               </Link>
             </div>
 
-            <div className="p-6">
+            <div className="grid gap-3 p-6 sm:grid-cols-3">
+              <ApplicationStat
+                title="Pending"
+                value={
+                  loading
+                    ? "—"
+                    : pendingApplications.toString()
+                }
+                icon={Clock3}
+                iconClassName="bg-amber-50 text-amber-600"
+              />
+
+              <ApplicationStat
+                title="Approved"
+                value={
+                  loading
+                    ? "—"
+                    : approvedApplications.toString()
+                }
+                icon={CheckCircle2}
+                iconClassName="bg-green-50 text-green-600"
+              />
+
+              <ApplicationStat
+                title="Rejected"
+                value={
+                  loading
+                    ? "—"
+                    : rejectedApplications.toString()
+                }
+                icon={Building2}
+                iconClassName="bg-red-50 text-red-600"
+              />
+            </div>
+
+            <div className="border-t border-slate-100 p-6">
               <div className="flex items-center justify-between rounded-xl bg-slate-50 p-4">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600">
@@ -227,7 +374,9 @@ function StatCard({
     <div className="rounded-2xl border border-slate-200 bg-white p-5">
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-sm text-slate-500">{title}</p>
+          <p className="text-sm text-slate-500">
+            {title}
+          </p>
 
           <p className="mt-2 text-3xl font-bold tracking-tight text-slate-950">
             {value}
@@ -262,11 +411,47 @@ function SmallStat({
       </div>
 
       <div>
-        <p className="text-xs text-slate-500">{title}</p>
+        <p className="text-xs text-slate-500">
+          {title}
+        </p>
 
         <p className="mt-1 text-xl font-bold text-slate-950">
           {value}
         </p>
+      </div>
+    </div>
+  );
+}
+
+function ApplicationStat({
+  title,
+  value,
+  icon: Icon,
+  iconClassName,
+}: {
+  title: string;
+  value: string;
+  icon: React.ElementType;
+  iconClassName: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 p-4">
+      <div className="flex items-center gap-3">
+        <div
+          className={`flex h-10 w-10 items-center justify-center rounded-xl ${iconClassName}`}
+        >
+          <Icon size={18} />
+        </div>
+
+        <div>
+          <p className="text-xs text-slate-500">
+            {title}
+          </p>
+
+          <p className="mt-1 text-xl font-bold text-slate-950">
+            {value}
+          </p>
+        </div>
       </div>
     </div>
   );
