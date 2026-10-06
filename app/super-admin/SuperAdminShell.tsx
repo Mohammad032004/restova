@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
+
 import {
   LayoutDashboard,
   FileCheck2,
@@ -19,49 +20,80 @@ import {
   LogOut,
   ChevronDown,
   ShieldCheck,
+  Layers,
 } from "lucide-react";
 
-const navigation = [
+interface NavigationChild {
+  label: string;
+  href: string;
+}
+
+interface NavigationItem {
+  name: string;
+  href: string;
+  icon: React.ElementType;
+  children?: NavigationChild[];
+}
+
+const navigation: NavigationItem[] = [
   {
     name: "Dashboard",
     href: "/super-admin",
     icon: LayoutDashboard,
   },
+
   {
     name: "Applications",
     href: "/super-admin/applications",
     icon: FileCheck2,
   },
+
   {
     name: "Restaurants",
     href: "/super-admin/restaurants",
     icon: Store,
   },
+
   {
     name: "Owners",
     href: "/super-admin/owners",
     icon: Users,
   },
+
   {
     name: "Subscriptions",
     href: "/super-admin/subscriptions",
     icon: CreditCard,
+    children: [
+      {
+        label: "Plans",
+        href: "/super-admin/subscriptions",
+      },
+      {
+        label: "Restaurant Subscriptions",
+        href: "/super-admin/subscriptions/restaurant-subscriptions",
+      },
+    ],
   },
+
   {
     name: "Payments",
     href: "/super-admin/payments",
     icon: IndianRupee,
   },
+
   {
     name: "Analytics",
     href: "/super-admin/analytics",
     icon: BarChart3,
   },
+
   {
     name: "Support",
     href: "/super-admin/support",
     icon: LifeBuoy,
   },
+
   {
     name: "Settings",
     href: "/super-admin/settings",
@@ -82,14 +114,30 @@ export default function SuperAdminShell({
   const [profileOpen, setProfileOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  const currentPage =
-    navigation.find((item) => {
-      if (item.href === "/super-admin") {
-        return pathname === item.href;
-      }
+  const subscriptionPathActive =
+    pathname.startsWith("/super-admin/subscriptions");
 
-      return pathname.startsWith(item.href);
-    })?.name || "Super Admin";
+  const [subscriptionsOpen, setSubscriptionsOpen] =
+    useState(subscriptionPathActive);
+
+  function getCurrentPage() {
+    if (pathname === "/super-admin") {
+      return "Dashboard";
+    }
+
+    for (const item of navigation) {
+      if (
+        item.href !== "/super-admin" &&
+        pathname.startsWith(item.href)
+      ) {
+        return item.name;
+      }
+    }
+
+    return "Super Admin";
+  }
+
+  const currentPage = getCurrentPage();
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -114,7 +162,9 @@ export default function SuperAdminShell({
       {/* Sidebar */}
       <aside
         className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-white transition-transform duration-200 lg:translate-x-0 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          sidebarOpen
+            ? "translate-x-0"
+            : "-translate-x-full"
         }`}
       >
         {/* Logo */}
@@ -125,7 +175,9 @@ export default function SuperAdminShell({
             onClick={() => setSidebarOpen(false)}
           >
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white">
-              <span className="text-lg font-bold">R</span>
+              <span className="text-lg font-bold">
+                R
+              </span>
             </div>
 
             <div>
@@ -159,16 +211,115 @@ export default function SuperAdminShell({
             {navigation.map((item) => {
               const Icon = item.icon;
 
+              const hasChildren =
+                Boolean(item.children?.length);
+
               const isActive =
                 item.href === "/super-admin"
                   ? pathname === item.href
                   : pathname.startsWith(item.href);
 
+              /*
+               * Navigation item with children
+               */
+              if (hasChildren) {
+                return (
+                  <div key={item.href}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSubscriptionsOpen(
+                          (value) => !value
+                        )
+                      }
+                      className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                        isActive
+                          ? "bg-slate-900 text-white"
+                          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                      }`}
+                    >
+                      <Icon
+                        size={18}
+                        className={
+                          isActive
+                            ? "text-white"
+                            : "text-slate-400 group-hover:text-slate-600"
+                        }
+                      />
+
+                      <span className="flex-1 text-left">
+                        {item.name}
+                      </span>
+
+                      <ChevronDown
+                        size={16}
+                        className={`transition-transform ${
+                          subscriptionsOpen
+                            ? "rotate-180"
+                            : ""
+                        } ${
+                          isActive
+                            ? "text-white"
+                            : "text-slate-400"
+                        }`}
+                      />
+                    </button>
+
+                    {subscriptionsOpen && (
+                      <div className="ml-5 mt-1 space-y-1 border-l border-slate-200 pl-3">
+                        {item.children?.map(
+                          (child) => {
+                            const childActive =
+                              pathname ===
+                              child.href;
+
+                            return (
+                              <Link
+                                key={child.href}
+                                href={child.href}
+                                onClick={() =>
+                                  setSidebarOpen(
+                                    false
+                                  )
+                                }
+                                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition ${
+                                  childActive
+                                    ? "bg-slate-100 font-semibold text-slate-900"
+                                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+                                }`}
+                              >
+                                <Layers
+                                  size={14}
+                                  className={
+                                    childActive
+                                      ? "text-slate-700"
+                                      : "text-slate-400"
+                                  }
+                                />
+
+                                <span>
+                                  {child.label}
+                                </span>
+                              </Link>
+                            );
+                          }
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
+              /*
+               * Normal navigation item
+               */
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  onClick={() => setSidebarOpen(false)}
+                  onClick={() =>
+                    setSidebarOpen(false)
+                  }
                   className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
                     isActive
                       ? "bg-slate-900 text-white"
@@ -241,7 +392,9 @@ export default function SuperAdminShell({
           <div className="relative">
             <button
               type="button"
-              onClick={() => setProfileOpen((value) => !value)}
+              onClick={() =>
+                setProfileOpen((value) => !value)
+              }
               className="flex items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-slate-100"
             >
               <div className="hidden text-right sm:block">
@@ -272,7 +425,9 @@ export default function SuperAdminShell({
                   type="button"
                   aria-label="Close profile menu"
                   className="fixed inset-0 z-40 cursor-default"
-                  onClick={() => setProfileOpen(false)}
+                  onClick={() =>
+                    setProfileOpen(false)
+                  }
                 />
 
                 <div className="absolute right-0 top-14 z-50 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
@@ -297,7 +452,9 @@ export default function SuperAdminShell({
                   <div className="p-2">
                     <Link
                       href="/super-admin/settings"
-                      onClick={() => setProfileOpen(false)}
+                      onClick={() =>
+                        setProfileOpen(false)
+                      }
                       className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                     >
                       <Settings size={17} />
@@ -312,7 +469,9 @@ export default function SuperAdminShell({
                     >
                       <LogOut size={17} />
 
-                      {loggingOut ? "Logging out..." : "Logout"}
+                      {loggingOut
+                        ? "Logging out..."
+                        : "Logout"}
                     </button>
                   </div>
                 </div>
@@ -330,7 +489,8 @@ export default function SuperAdminShell({
             />
 
             <span>
-              You are accessing the Restova platform administration panel.
+              You are accessing the Restova platform
+              administration panel.
             </span>
           </div>
         </div>
