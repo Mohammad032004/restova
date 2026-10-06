@@ -71,9 +71,11 @@ export default function RestaurantSubscriptionsPage() {
 
   const [loading, setLoading] = useState(true);
   const [assigning, setAssigning] = useState(false);
-  const [updatingId, setUpdatingId] = useState<string | null>(
-    null
-  );
+  const [processingExpiry, setProcessingExpiry] =
+    useState(false);
+
+  const [updatingId, setUpdatingId] =
+    useState<string | null>(null);
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -81,19 +83,23 @@ export default function RestaurantSubscriptionsPage() {
   const [showAssignForm, setShowAssignForm] =
     useState(false);
 
-  const [openMenuId, setOpenMenuId] = useState<
-    string | null
-  >(null);
+  const [openMenuId, setOpenMenuId] =
+    useState<string | null>(null);
 
-  const [restaurantId, setRestaurantId] = useState("");
+  const [restaurantId, setRestaurantId] =
+    useState("");
+
   const [planId, setPlanId] = useState("");
-  const [startDate, setStartDate] = useState("");
+
+  const [startDate, setStartDate] =
+    useState("");
 
   const [status, setStatus] = useState<
     "ACTIVE" | "TRIAL"
   >("ACTIVE");
 
-  const [autoRenew, setAutoRenew] = useState(false);
+  const [autoRenew, setAutoRenew] =
+    useState(false);
 
   async function loadData() {
     try {
@@ -118,7 +124,8 @@ export default function RestaurantSubscriptionsPage() {
       const restaurantsData =
         await restaurantsResponse.json();
 
-      const plansData = await plansResponse.json();
+      const plansData =
+        await plansResponse.json();
 
       if (!subscriptionsResponse.ok) {
         throw new Error(
@@ -151,7 +158,8 @@ export default function RestaurantSubscriptionsPage() {
 
       setPlans(
         (plansData.plans || []).filter(
-          (plan: SubscriptionPlan) => plan.isActive
+          (plan: SubscriptionPlan) =>
+            plan.isActive
         )
       );
     } catch (err) {
@@ -239,6 +247,48 @@ export default function RestaurantSubscriptionsPage() {
     }
   }
 
+  async function processExpiredSubscriptions() {
+    try {
+      setProcessingExpiry(true);
+      setError("");
+      setSuccess("");
+
+      const response = await fetch(
+        "/api/super-admin/restaurant-subscriptions/expire",
+        {
+          method: "POST",
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            "Failed to process subscription expiry."
+        );
+      }
+
+      const count = data.expiredCount || 0;
+
+      setSuccess(
+        `${count} subscription${
+          count === 1 ? "" : "s"
+        } expired.`
+      );
+
+      await loadData();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to process subscription expiry."
+      );
+    } finally {
+      setProcessingExpiry(false);
+    }
+  }
+
   async function updateSubscription(
     id: string,
     updates: {
@@ -288,11 +338,14 @@ export default function RestaurantSubscriptionsPage() {
   }
 
   function formatDate(date: string) {
-    return new Date(date).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
+    return new Date(date).toLocaleDateString(
+      "en-IN",
+      {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }
+    );
   }
 
   function formatPrice(price: number) {
@@ -327,33 +380,23 @@ export default function RestaurantSubscriptionsPage() {
     }
   }
 
-  function getActionStatus(
-    subscription: RestaurantSubscription
-  ) {
-    if (
-      subscription.status === "ACTIVE" ||
-      subscription.status === "TRIAL"
-    ) {
-      return "ACTIVE";
-    }
+  const activeSubscriptions =
+    subscriptions.filter(
+      (subscription) =>
+        subscription.status === "ACTIVE"
+    ).length;
 
-    return subscription.status;
-  }
+  const trialSubscriptions =
+    subscriptions.filter(
+      (subscription) =>
+        subscription.status === "TRIAL"
+    ).length;
 
-  const activeSubscriptions = subscriptions.filter(
-    (subscription) =>
-      subscription.status === "ACTIVE"
-  ).length;
-
-  const trialSubscriptions = subscriptions.filter(
-    (subscription) =>
-      subscription.status === "TRIAL"
-  ).length;
-
-  const expiredSubscriptions = subscriptions.filter(
-    (subscription) =>
-      subscription.status === "EXPIRED"
-  ).length;
+  const expiredSubscriptions =
+    subscriptions.filter(
+      (subscription) =>
+        subscription.status === "EXPIRED"
+    ).length;
 
   const subscribedRestaurantIds =
     subscriptions
@@ -386,9 +429,14 @@ export default function RestaurantSubscriptionsPage() {
           <div>
             <div className="mb-2 flex items-center gap-2 text-sm text-slate-500">
               <CreditCard size={16} />
+
               <span>Subscriptions</span>
+
               <span>/</span>
-              <span>Restaurant Subscriptions</span>
+
+              <span>
+                Restaurant Subscriptions
+              </span>
             </div>
 
             <h1 className="text-2xl font-bold tracking-tight text-slate-900">
@@ -396,12 +444,13 @@ export default function RestaurantSubscriptionsPage() {
             </h1>
 
             <p className="mt-1 text-sm text-slate-500">
-              Assign and manage subscription plans for
-              restaurants.
+              Assign and manage subscription plans
+              for restaurants.
             </p>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
+            {/* Refresh */}
             <button
               type="button"
               onClick={(event) => {
@@ -414,12 +463,40 @@ export default function RestaurantSubscriptionsPage() {
               <RefreshCw
                 size={16}
                 className={
-                  loading ? "animate-spin" : ""
+                  loading
+                    ? "animate-spin"
+                    : ""
                 }
               />
+
               Refresh
             </button>
 
+            {/* Process Expiry */}
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                processExpiredSubscriptions();
+              }}
+              disabled={processingExpiry}
+              className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-white px-4 py-2.5 text-sm font-medium text-amber-700 shadow-sm transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {processingExpiry ? (
+                <Loader2
+                  size={16}
+                  className="animate-spin"
+                />
+              ) : (
+                <RefreshCw size={16} />
+              )}
+
+              {processingExpiry
+                ? "Processing..."
+                : "Process Expiry"}
+            </button>
+
+            {/* Assign */}
             <button
               type="button"
               onClick={(event) => {
@@ -433,6 +510,7 @@ export default function RestaurantSubscriptionsPage() {
               className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
             >
               <Plus size={17} />
+
               Assign Subscription
             </button>
           </div>
@@ -509,8 +587,8 @@ export default function RestaurantSubscriptionsPage() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Assign an active subscription plan to a
-                  restaurant.
+                  Assign an active subscription plan
+                  to a restaurant.
                 </p>
               </div>
 
@@ -527,7 +605,9 @@ export default function RestaurantSubscriptionsPage() {
             </div>
 
             <form
-              onSubmit={handleAssignSubscription}
+              onSubmit={
+                handleAssignSubscription
+              }
               className="grid gap-5 md:grid-cols-2"
             >
               {/* Restaurant */}
@@ -598,7 +678,9 @@ export default function RestaurantSubscriptionsPage() {
                   <select
                     value={planId}
                     onChange={(event) =>
-                      setPlanId(event.target.value)
+                      setPlanId(
+                        event.target.value
+                      )
                     }
                     className="w-full appearance-none rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-10 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
                   >
@@ -773,8 +855,8 @@ export default function RestaurantSubscriptionsPage() {
               </h3>
 
               <p className="mt-1 max-w-md text-sm text-slate-500">
-                Assign a subscription plan to a restaurant
-                to see it here.
+                Assign a subscription plan to a
+                restaurant to see it here.
               </p>
             </div>
           ) : (
@@ -827,11 +909,6 @@ export default function RestaurantSubscriptionsPage() {
                         updatingId ===
                         subscription._id;
 
-                      const actionStatus =
-                        getActionStatus(
-                          subscription
-                        );
-
                       return (
                         <tr
                           key={subscription._id}
@@ -876,12 +953,14 @@ export default function RestaurantSubscriptionsPage() {
                             <p className="mt-1 text-xs text-slate-500">
                               {
                                 subscription
-                                  .planId?.maxTables
+                                  .planId
+                                  ?.maxTables
                               }{" "}
                               tables ·{" "}
                               {
                                 subscription
-                                  .planId?.maxStaff
+                                  .planId
+                                  ?.maxStaff
                               }{" "}
                               staff
                             </p>
@@ -896,7 +975,7 @@ export default function RestaurantSubscriptionsPage() {
                             </span>
                           </td>
 
-                          {/* Billing */}
+                          {/* Period */}
                           <td className="px-6 py-5">
                             <span className="text-sm capitalize text-slate-700">
                               {subscription.billingCycle.toLowerCase()}
@@ -965,7 +1044,9 @@ export default function RestaurantSubscriptionsPage() {
                             <div className="relative flex justify-end">
                               <button
                                 type="button"
-                                disabled={isUpdating}
+                                disabled={
+                                  isUpdating
+                                }
                                 onClick={(event) => {
                                   event.stopPropagation();
 
@@ -999,7 +1080,36 @@ export default function RestaurantSubscriptionsPage() {
                                     event.stopPropagation()
                                   }
                                 >
-                                  {actionStatus !==
+                                  {/* Activate */}
+                                  {subscription.status !==
+                                    "ACTIVE" &&
+                                    subscription.status !==
+                                      "TRIAL" && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          updateSubscription(
+                                            subscription._id,
+                                            {
+                                              status:
+                                                "ACTIVE",
+                                            },
+                                            "Subscription activated successfully."
+                                          )
+                                        }
+                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                                      >
+                                        <CheckCircle2
+                                          size={16}
+                                          className="text-emerald-600"
+                                        />
+
+                                        Activate
+                                      </button>
+                                    )}
+
+                                  {/* Suspend */}
+                                  {subscription.status ===
                                     "ACTIVE" && (
                                     <button
                                       type="button"
@@ -1008,67 +1118,48 @@ export default function RestaurantSubscriptionsPage() {
                                           subscription._id,
                                           {
                                             status:
-                                              "ACTIVE",
+                                              "SUSPENDED",
                                           },
-                                          "Subscription activated successfully."
+                                          "Subscription suspended successfully."
                                         )
                                       }
                                       className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
                                     >
-                                      <CheckCircle2
+                                      <XCircle
                                         size={16}
-                                        className="text-emerald-600"
+                                        className="text-amber-600"
                                       />
-                                      Activate
+
+                                      Suspend
                                     </button>
                                   )}
 
+                                  {/* Cancel */}
                                   {subscription.status ===
                                     "ACTIVE" && (
-                                    <>
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          updateSubscription(
-                                            subscription._id,
-                                            {
-                                              status:
-                                                "SUSPENDED",
-                                            },
-                                            "Subscription suspended successfully."
-                                          )
-                                        }
-                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
-                                      >
-                                        <XCircle
-                                          size={16}
-                                          className="text-amber-600"
-                                        />
-                                        Suspend
-                                      </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateSubscription(
+                                          subscription._id,
+                                          {
+                                            status:
+                                              "CANCELLED",
+                                          },
+                                          "Subscription cancelled successfully."
+                                        )
+                                      }
+                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-50"
+                                    >
+                                      <XCircle
+                                        size={16}
+                                      />
 
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          updateSubscription(
-                                            subscription._id,
-                                            {
-                                              status:
-                                                "CANCELLED",
-                                            },
-                                            "Subscription cancelled successfully."
-                                          )
-                                        }
-                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-50"
-                                      >
-                                        <XCircle
-                                          size={16}
-                                        />
-                                        Cancel
-                                      </button>
-                                    </>
+                                      Cancel
+                                    </button>
                                   )}
 
+                                  {/* Trial → Active */}
                                   {subscription.status ===
                                     "TRIAL" && (
                                     <button
@@ -1089,10 +1180,12 @@ export default function RestaurantSubscriptionsPage() {
                                         size={16}
                                         className="text-blue-600"
                                       />
+
                                       Convert to Active
                                     </button>
                                   )}
 
+                                  {/* Auto Renew */}
                                   <button
                                     type="button"
                                     onClick={() =>
@@ -1113,11 +1206,13 @@ export default function RestaurantSubscriptionsPage() {
                                       size={16}
                                       className="text-slate-500"
                                     />
+
                                     {subscription.autoRenew
                                       ? "Disable Auto Renew"
                                       : "Enable Auto Renew"}
                                   </button>
 
+                                  {/* Reactivate expired */}
                                   {subscription.status ===
                                     "EXPIRED" && (
                                     <button
@@ -1138,6 +1233,7 @@ export default function RestaurantSubscriptionsPage() {
                                         size={16}
                                         className="text-emerald-600"
                                       />
+
                                       Reactivate
                                     </button>
                                   )}
