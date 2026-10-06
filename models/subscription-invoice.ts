@@ -7,7 +7,10 @@ export type SubscriptionInvoiceStatus =
   | "REFUNDED"
   | "CANCELLED";
 
-export type PaymentGateway = "RAZORPAY" | "OTHER";
+export type PaymentGateway =
+  | "RAZORPAY"
+  | "DEMO"
+  | "OTHER";
 
 export interface ISubscriptionInvoice extends Document {
   restaurantId: mongoose.Types.ObjectId;
@@ -34,98 +37,99 @@ export interface ISubscriptionInvoice extends Document {
   updatedAt: Date;
 }
 
-const SubscriptionInvoiceSchema = new Schema<ISubscriptionInvoice>(
-  {
-    restaurantId: {
-      type: Schema.Types.ObjectId,
-      ref: "Restaurant",
-      required: true,
-      index: true,
-    },
+const SubscriptionInvoiceSchema =
+  new Schema<ISubscriptionInvoice>(
+    {
+      restaurantId: {
+        type: Schema.Types.ObjectId,
+        ref: "Restaurant",
+        required: true,
+        index: true,
+      },
 
-    subscriptionId: {
-      type: Schema.Types.ObjectId,
-      ref: "RestaurantSubscription",
-      required: true,
-      index: true,
-    },
+      subscriptionId: {
+        type: Schema.Types.ObjectId,
+        ref: "RestaurantSubscription",
+        required: true,
+        index: true,
+      },
 
-    invoiceNumber: {
-      type: String,
-      required: true,
-      unique: true,
-      trim: true,
-      index: true,
-    },
+      invoiceNumber: {
+        type: String,
+        required: true,
+        unique: true,
+        trim: true,
+        index: true,
+      },
 
-    amount: {
-      type: Number,
-      required: true,
-      min: 0,
-    },
+      amount: {
+        type: Number,
+        required: true,
+        min: 0,
+      },
 
-    currency: {
-      type: String,
-      required: true,
-      default: "INR",
-      uppercase: true,
-      trim: true,
-    },
+      currency: {
+        type: String,
+        required: true,
+        default: "INR",
+        uppercase: true,
+        trim: true,
+      },
 
-    status: {
-      type: String,
-      enum: [
-        "PENDING",
-        "PAID",
-        "FAILED",
-        "REFUNDED",
-        "CANCELLED",
-      ],
-      required: true,
-      default: "PENDING",
-      index: true,
-    },
+      status: {
+        type: String,
+        enum: [
+          "PENDING",
+          "PAID",
+          "FAILED",
+          "REFUNDED",
+          "CANCELLED",
+        ],
+        required: true,
+        default: "PENDING",
+        index: true,
+      },
 
-    issueDate: {
-      type: Date,
-      required: true,
-      default: Date.now,
-    },
+      issueDate: {
+        type: Date,
+        required: true,
+        default: Date.now,
+      },
 
-    dueDate: {
-      type: Date,
-    },
+      dueDate: {
+        type: Date,
+      },
 
-    paidAt: {
-      type: Date,
-    },
+      paidAt: {
+        type: Date,
+      },
 
-    paymentGateway: {
-      type: String,
-      enum: ["RAZORPAY", "OTHER"],
-    },
+      paymentGateway: {
+        type: String,
+        enum: ["RAZORPAY", "DEMO", "OTHER"],
+      },
 
-    gatewayOrderId: {
-      type: String,
-      trim: true,
-      index: true,
-    },
+      gatewayOrderId: {
+        type: String,
+        trim: true,
+        index: true,
+      },
 
-    gatewayPaymentId: {
-      type: String,
-      trim: true,
-      index: true,
-    },
+      gatewayPaymentId: {
+        type: String,
+        trim: true,
+        index: true,
+      },
 
-    notes: {
-      type: String,
-      trim: true,
+      notes: {
+        type: String,
+        trim: true,
+      },
     },
-  },
-  {
-    timestamps: true,
-  }
-);
+    {
+      timestamps: true,
+    }
+  );
 
 SubscriptionInvoiceSchema.index({
   restaurantId: 1,
