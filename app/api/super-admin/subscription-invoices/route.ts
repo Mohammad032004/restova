@@ -7,7 +7,16 @@ import Restaurant from "@/models/restaurant";
 import RestaurantSubscription from "@/models/restaurant-subscription";
 import SubscriptionInvoice from "@/models/subscription-invoice";
 
-async function requireSuperAdmin() {
+type AuthResult =
+  | {
+      authorized: true;
+    }
+  | {
+      authorized: false;
+      response: NextResponse;
+    };
+
+async function requireSuperAdmin(): Promise<AuthResult> {
   const session = await getServerSession(authOptions);
 
   if (!session?.user) {
@@ -38,7 +47,6 @@ async function requireSuperAdmin() {
 
   return {
     authorized: true,
-    response: null,
   };
 }
 
@@ -150,13 +158,17 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message: "Amount must be a valid non-negative number.",
+          message:
+            "Amount must be a valid non-negative number.",
         },
         { status: 400 }
       );
     }
 
-    if (currency !== undefined && typeof currency !== "string") {
+    if (
+      currency !== undefined &&
+      typeof currency !== "string"
+    ) {
       return NextResponse.json(
         {
           success: false,
@@ -183,7 +195,8 @@ export async function POST(request: Request) {
 
     await connectDB();
 
-    const restaurant = await Restaurant.findById(restaurantId);
+    const restaurant =
+      await Restaurant.findById(restaurantId);
 
     if (!restaurant) {
       return NextResponse.json(
@@ -195,9 +208,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const subscription = await RestaurantSubscription.findById(
-      subscriptionId
-    );
+    const subscription =
+      await RestaurantSubscription.findById(
+        subscriptionId
+      );
 
     if (!subscription) {
       return NextResponse.json(
@@ -210,7 +224,8 @@ export async function POST(request: Request) {
     }
 
     if (
-      subscription.restaurantId.toString() !== restaurant._id.toString()
+      subscription.restaurantId.toString() !==
+      restaurant._id.toString()
     ) {
       return NextResponse.json(
         {
@@ -224,56 +239,68 @@ export async function POST(request: Request) {
 
     const invoiceNumber = generateInvoiceNumber();
 
-    const invoice = await SubscriptionInvoice.create({
-      restaurantId: restaurant._id,
-      subscriptionId: subscription._id,
-      invoiceNumber,
-      amount,
-      currency:
-        typeof currency === "string" && currency.trim()
-          ? currency.trim().toUpperCase()
-          : "INR",
-      status: "PENDING",
-      issueDate: new Date(),
-      dueDate: dueDate ? new Date(dueDate) : undefined,
-      notes:
-        typeof notes === "string" && notes.trim()
-          ? notes.trim()
+    const invoice =
+      await SubscriptionInvoice.create({
+        restaurantId: restaurant._id,
+        subscriptionId: subscription._id,
+        invoiceNumber,
+        amount,
+        currency:
+          typeof currency === "string" &&
+          currency.trim()
+            ? currency.trim().toUpperCase()
+            : "INR",
+        status: "PENDING",
+        issueDate: new Date(),
+        dueDate: dueDate
+          ? new Date(dueDate)
           : undefined,
-    });
+        notes:
+          typeof notes === "string" &&
+          notes.trim()
+            ? notes.trim()
+            : undefined,
+      });
 
-    const populatedInvoice = await SubscriptionInvoice.findById(
-      invoice._id
-    )
-      .populate({
-        path: "restaurantId",
-        select: "name type city state status",
-      })
-      .populate({
-        path: "subscriptionId",
-        select: "status startDate endDate billingCycle price planId",
-        populate: {
-          path: "planId",
-          select: "name billingCycle",
-        },
-      })
-      .lean();
+    const populatedInvoice =
+      await SubscriptionInvoice.findById(
+        invoice._id
+      )
+        .populate({
+          path: "restaurantId",
+          select: "name type city state status",
+        })
+        .populate({
+          path: "subscriptionId",
+          select:
+            "status startDate endDate billingCycle price planId",
+          populate: {
+            path: "planId",
+            select: "name billingCycle",
+          },
+        })
+        .lean();
 
     return NextResponse.json(
       {
         success: true,
-        message: "Subscription invoice created successfully.",
+        message:
+          "Subscription invoice created successfully.",
         invoice: populatedInvoice,
       },
       { status: 201 }
     );
   } catch (error) {
-    console.error("Create subscription invoice error:", error);
+    console.error(
+      "Create subscription invoice error:",
+      error
+    );
 
     return NextResponse.json(
       {
         success: false,
-        message: "Failed to create subscription invoice.",
+        message:
+          "Failed to create subscription invoice.",
       },
       { status: 500 }
     );
