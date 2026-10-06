@@ -101,3 +101,28 @@ export async function POST(request: Request) {
     );
   }
 }
+
+export async function GET() {
+  try {
+    await connectDB();
+
+    const applications = await RestaurantApplication.find()
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return NextResponse.json({
+      success: true,
+      applications,
+    });
+  } catch (error) {
+    console.error("Get applications error:", error);
+
+    return NextResponse.json(
+      {
+        success: false,
+        message: "Failed to load applications.",
+      },
+      { status: 500 }
+    );
+  }
+}

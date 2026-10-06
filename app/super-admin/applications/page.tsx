@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Building2,
@@ -9,16 +12,111 @@ import {
   Phone,
   XCircle,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 
-import { connectDB } from "@/lib/mongodb";
-import RestaurantApplication from "@/models/restaurant-application";
+interface Application {
+  _id: string;
+  restaurantName: string;
+  restaurantType: string;
+  numberOfTables: number;
 
-export default async function ApplicationsPage() {
-  await connectDB();
+  ownerName: string;
+  email: string;
+  phone: string;
 
-  const applications = await RestaurantApplication.find()
-    .sort({ createdAt: -1 })
-    .lean();
+  address: string;
+  city: string;
+  state: string;
+  pincode: string;
+
+  status: "PENDING" | "APPROVED" | "REJECTED";
+
+  createdAt: string;
+  updatedAt: string;
+}
+
+export default function ApplicationsPage() {
+  const router = useRouter();
+
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetchApplications();
+  }, []);
+
+  async function fetchApplications() {
+    try {
+      setLoading(true);
+      setError("");
+
+      const response = await fetch("/api/applications");
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.message || "Failed to load applications."
+        );
+      }
+
+      setApplications(result.applications || []);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while loading applications."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function rejectApplication(id: string) {
+    const confirmed = window.confirm(
+      "Are you sure you want to reject this application?"
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setRejectingId(id);
+      setError("");
+
+      const response = await fetch(`/api/applications/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "reject",
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.message || "Failed to reject application."
+        );
+      }
+
+      await fetchApplications();
+      router.refresh();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while rejecting the application."
+      );
+    } finally {
+      setRejectingId(null);
+    }
+  }
 
   const pendingCount = applications.filter(
     (application) => application.status === "PENDING"
@@ -37,7 +135,8 @@ export default async function ApplicationsPage() {
       {/* Header */}
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
-          <div className="flex items-center gap-2.5">
+          {/* Logo */}
+          <Link href="/" className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white">
               R
             </div>
@@ -51,8 +150,9 @@ export default async function ApplicationsPage() {
                 Super Admin
               </p>
             </div>
-          </div>
+          </Link>
 
+          {/* Back */}
           <Link
             href="/"
             className="flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-slate-950"
@@ -80,8 +180,16 @@ export default async function ApplicationsPage() {
           </p>
         </div>
 
+        {/* Error */}
+        {error && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
         {/* Stats */}
         <div className="mb-8 grid gap-4 sm:grid-cols-3">
+          {/* Pending */}
           <div className="rounded-2xl border border-slate-200 bg-white p-5">
             <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600">
               <Clock3 size={20} />
@@ -90,10 +198,11 @@ export default async function ApplicationsPage() {
             <p className="text-sm text-slate-500">Pending</p>
 
             <p className="mt-1 text-2xl font-bold text-slate-950">
-              {pendingCount}
+              {loading ? "—" : pendingCount}
             </p>
           </div>
 
+          {/* Approved */}
           <div className="rounded-2xl border border-slate-200 bg-white p-5">
             <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-green-50 text-green-600">
               <CheckCircle2 size={20} />
@@ -102,10 +211,11 @@ export default async function ApplicationsPage() {
             <p className="text-sm text-slate-500">Approved</p>
 
             <p className="mt-1 text-2xl font-bold text-slate-950">
-              {approvedCount}
+              {loading ? "—" : approvedCount}
             </p>
           </div>
 
+          {/* Rejected */}
           <div className="rounded-2xl border border-slate-200 bg-white p-5">
             <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-red-600">
               <XCircle size={20} />
@@ -114,25 +224,41 @@ export default async function ApplicationsPage() {
             <p className="text-sm text-slate-500">Rejected</p>
 
             <p className="mt-1 text-2xl font-bold text-slate-950">
-              {rejectedCount}
+              {loading ? "—" : rejectedCount}
             </p>
           </div>
         </div>
 
         {/* Applications */}
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          {/* Header */}
           <div className="border-b border-slate-200 px-6 py-5">
             <h2 className="font-semibold text-slate-950">
               Applications
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              {applications.length} total application
-              {applications.length !== 1 ? "s" : ""}
+              {loading
+                ? "Loading applications..."
+                : `${applications.length} total application${
+                    applications.length !== 1 ? "s" : ""
+                  }`}
             </p>
           </div>
 
-          {applications.length === 0 ? (
+          {/* Loading */}
+          {loading && (
+            <div className="flex min-h-80 flex-col items-center justify-center px-6 text-center">
+              <div className="mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-slate-950" />
+
+              <p className="text-sm text-slate-500">
+                Loading applications...
+              </p>
+            </div>
+          )}
+
+          {/* Empty */}
+          {!loading && applications.length === 0 && (
             <div className="flex min-h-80 flex-col items-center justify-center px-6 text-center">
               <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
                 <Building2 size={24} />
@@ -147,13 +273,14 @@ export default async function ApplicationsPage() {
                 here.
               </p>
             </div>
-          ) : (
+          )}
+
+          {/* Application List */}
+          {!loading && applications.length > 0 && (
             <div className="divide-y divide-slate-100">
               {applications.map((application) => (
-                <div
-                  key={application._id.toString()}
-                  className="p-6"
-                >
+                <div key={application._id} className="p-6">
+                  {/* Main Information */}
                   <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
                     {/* Restaurant */}
                     <div className="flex gap-4">
@@ -167,11 +294,16 @@ export default async function ApplicationsPage() {
                             {application.restaurantName}
                           </h3>
 
-                          <StatusBadge status={application.status} />
+                          <StatusBadge
+                            status={application.status}
+                          />
                         </div>
 
-                        <p className="mt-1 text-sm text-slate-500">
-                          {application.restaurantType}
+                        <p className="mt-1 text-sm capitalize text-slate-500">
+                          {application.restaurantType.replace(
+                            "-",
+                            " "
+                          )}
                         </p>
 
                         <p className="mt-2 text-xs text-slate-400">
@@ -191,18 +323,27 @@ export default async function ApplicationsPage() {
                     <div className="grid gap-3 text-sm text-slate-600 sm:grid-cols-2 lg:min-w-[420px]">
                       <div className="flex items-center gap-2">
                         <UserIcon />
+
                         <span>{application.ownerName}</span>
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <Mail size={16} className="text-slate-400" />
+                        <Mail
+                          size={16}
+                          className="shrink-0 text-slate-400"
+                        />
+
                         <span className="break-all">
                           {application.email}
                         </span>
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <Phone size={16} className="text-slate-400" />
+                        <Phone
+                          size={16}
+                          className="shrink-0 text-slate-400"
+                        />
+
                         <span>{application.phone}</span>
                       </div>
 
@@ -213,7 +354,8 @@ export default async function ApplicationsPage() {
                         />
 
                         <span>
-                          {application.city}, {application.state}
+                          {application.city},{" "}
+                          {application.state}
                         </span>
                       </div>
                     </div>
@@ -248,7 +390,7 @@ export default async function ApplicationsPage() {
                         </p>
 
                         <p className="mt-1 truncate font-mono text-xs text-slate-600">
-                          {application._id.toString()}
+                          {application._id}
                         </p>
                       </div>
                     </div>
@@ -257,20 +399,31 @@ export default async function ApplicationsPage() {
                   {/* Actions */}
                   {application.status === "PENDING" && (
                     <div className="mt-5 flex flex-wrap gap-3">
+                      {/* Approve */}
                       <button
                         type="button"
-                        className="inline-flex items-center gap-2 rounded-xl bg-green-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-green-700"
+                        disabled
+                        title="Approval will be enabled after the restaurant and owner account system is ready."
+                        className="inline-flex cursor-not-allowed items-center gap-2 rounded-xl bg-slate-300 px-4 py-2.5 text-sm font-semibold text-white"
                       >
                         <CheckCircle2 size={17} />
                         Approve
                       </button>
 
+                      {/* Reject */}
                       <button
                         type="button"
-                        className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50"
+                        disabled={rejectingId === application._id}
+                        onClick={() =>
+                          rejectApplication(application._id)
+                        }
+                        className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <XCircle size={17} />
-                        Reject
+
+                        {rejectingId === application._id
+                          ? "Rejecting..."
+                          : "Reject"}
                       </button>
                     </div>
                   )}
@@ -314,7 +467,7 @@ function StatusBadge({
 
 function UserIcon() {
   return (
-    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-slate-200 text-[9px] font-bold text-slate-500">
+    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-slate-200 text-[9px] font-bold text-slate-500">
       U
     </span>
   );
