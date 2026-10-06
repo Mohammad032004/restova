@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { signIn } from "next-auth/react";
+import { getSession, signIn } from "next-auth/react";
 import {
   Eye,
   EyeOff,
@@ -55,7 +55,38 @@ export default function LoginPage() {
 
       switch (role) {
         case "SUPER_ADMIN":
-          window.location.href = "/super-admin";
+          const session = await getSession();
+
+if (!session?.user?.role) {
+  setError("Unable to determine your account role.");
+  return;
+}
+
+switch (session.user.role) {
+  case "SUPER_ADMIN":
+    window.location.href = "/super-admin";
+    break;
+
+  case "RESTAURANT_OWNER":
+  case "MANAGER":
+    window.location.href = "/dashboard";
+    break;
+
+  case "KITCHEN":
+    window.location.href = "/kitchen";
+    break;
+
+  case "WAITER":
+    window.location.href = "/waiter";
+    break;
+
+  case "CASHIER":
+    window.location.href = "/cashier";
+    break;
+
+  default:
+    setError("Your account role is not supported.");
+}
           break;
 
         case "RESTAURANT_OWNER":
