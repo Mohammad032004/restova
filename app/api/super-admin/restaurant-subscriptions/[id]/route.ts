@@ -229,3 +229,76 @@ export async function PATCH(
     );
   }
 }
+export async function GET(
+  request: Request,
+  context: {
+    params: Promise<{
+      id: string;
+    }>;
+  }
+) {
+  try {
+    const auth = await requireSuperAdmin();
+
+    if (!auth.authorized) {
+      return auth.response;
+    }
+
+    const { id } = await context.params;
+
+    if (!id) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Subscription ID is required.",
+        },
+        { status: 400 }
+      );
+    }
+
+    await connectDB();
+
+    const subscription =
+      await RestaurantSubscription.findById(id)
+        .populate({
+          path: "restaurantId",
+          select:
+            "name type city state address pincode status numberOfTables ownerId",
+        })
+        .populate({
+          path: "planId",
+          select:
+            "name description price billingCycle features maxTables maxStaff isActive",
+        })
+        .lean();
+
+    if (!subscription) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Subscription not found.",
+        },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      subscription,
+    });
+  } catch (error) {
+    console.error(
+      "Get restaurant subscription details error:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        success: false,
+        message:
+          "Failed to load subscription details.",
+      },
+      { status: 500 }
+    );
+  }
+}
