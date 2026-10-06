@@ -7,7 +7,9 @@ import Restaurant from "@/models/restaurant";
 
 export async function PATCH(
   request: Request,
-  context: { params: Promise<{ id: string }> }
+  context: {
+    params: Promise<{ id: string }>;
+  }
 ) {
   try {
     const session = await getServerSession(authOptions);
@@ -26,7 +28,8 @@ export async function PATCH(
       return NextResponse.json(
         {
           success: false,
-          message: "Forbidden. Super Admin access required.",
+          message:
+            "Forbidden. Super Admin access required.",
         },
         { status: 403 }
       );
@@ -48,7 +51,10 @@ export async function PATCH(
 
     const { status } = body;
 
-    if (status !== "ACTIVE" && status !== "SUSPENDED") {
+    if (
+      status !== "ACTIVE" &&
+      status !== "SUSPENDED"
+    ) {
       return NextResponse.json(
         {
           success: false,
@@ -60,7 +66,8 @@ export async function PATCH(
 
     await connectDB();
 
-    const restaurant = await Restaurant.findById(id);
+    const restaurant =
+      await Restaurant.findById(id);
 
     if (!restaurant) {
       return NextResponse.json(
@@ -88,12 +95,16 @@ export async function PATCH(
       },
     });
   } catch (error) {
-    console.error("Restaurant status update error:", error);
+    console.error(
+      "Restaurant status update error:",
+      error
+    );
 
     return NextResponse.json(
       {
         success: false,
-        message: "Failed to update restaurant status.",
+        message:
+          "Failed to update restaurant status.",
       },
       { status: 500 }
     );
