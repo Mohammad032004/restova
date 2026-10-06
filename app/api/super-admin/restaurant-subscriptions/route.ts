@@ -8,7 +8,16 @@ import SubscriptionPlan from "@/models/subscription-plan";
 import RestaurantSubscription from "@/models/restaurant-subscription";
 import SubscriptionInvoice from "@/models/subscription-invoice";
 
-async function requireSuperAdmin() {
+type AuthResult =
+  | {
+      authorized: true;
+    }
+  | {
+      authorized: false;
+      response: NextResponse;
+    };
+
+async function requireSuperAdmin(): Promise<AuthResult> {
   const session = await getServerSession(authOptions);
 
   if (!session?.user) {
@@ -39,7 +48,6 @@ async function requireSuperAdmin() {
 
   return {
     authorized: true,
-    response: null,
   };
 }
 
@@ -48,14 +56,17 @@ function generateInvoiceNumber() {
 
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
-  const random = Math.floor(100000 + Math.random() * 900000);
+  const random = Math.floor(
+    100000 + Math.random() * 900000
+  );
 
   return `RST-${year}${month}-${random}`;
 }
 
 /**
  * GET
- * Fetch all restaurant subscriptions
+ *
+ * Fetch all restaurant subscriptions.
  */
 export async function GET() {
   try {
@@ -67,20 +78,22 @@ export async function GET() {
 
     await connectDB();
 
-    const subscriptions = await RestaurantSubscription.find()
-      .populate({
-        path: "restaurantId",
-        select: "name type city state status numberOfTables",
-        model: Restaurant,
-      })
-      .populate({
-        path: "planId",
-        select:
-          "name description price billingCycle features maxTables maxStaff isActive",
-        model: SubscriptionPlan,
-      })
-      .sort({ createdAt: -1 })
-      .lean();
+    const subscriptions =
+      await RestaurantSubscription.find()
+        .populate({
+          path: "restaurantId",
+          select:
+            "name type city state status numberOfTables",
+          model: Restaurant,
+        })
+        .populate({
+          path: "planId",
+          select:
+            "name description price billingCycle features maxTables maxStaff isActive",
+          model: SubscriptionPlan,
+        })
+        .sort({ createdAt: -1 })
+        .lean();
 
     return NextResponse.json({
       success: true,
@@ -95,7 +108,8 @@ export async function GET() {
     return NextResponse.json(
       {
         success: false,
-        message: "Failed to load restaurant subscriptions.",
+        message:
+          "Failed to load restaurant subscriptions.",
       },
       { status: 500 }
     );
@@ -104,7 +118,8 @@ export async function GET() {
 
 /**
  * POST
- * Assign a subscription plan to a restaurant
+ *
+ * Assign a subscription plan to a restaurant.
  *
  * This also creates the first subscription invoice.
  */
@@ -160,7 +175,8 @@ export async function POST(request: Request) {
 
     await connectDB();
 
-    const restaurant = await Restaurant.findById(restaurantId);
+    const restaurant =
+      await Restaurant.findById(restaurantId);
 
     if (!restaurant) {
       return NextResponse.json(
@@ -172,7 +188,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const plan = await SubscriptionPlan.findById(planId);
+    const plan =
+      await SubscriptionPlan.findById(planId);
 
     if (!plan) {
       return NextResponse.json(
@@ -222,7 +239,11 @@ export async function POST(request: Request) {
       ? new Date(startDate)
       : new Date();
 
-    if (Number.isNaN(subscriptionStartDate.getTime())) {
+    if (
+      Number.isNaN(
+        subscriptionStartDate.getTime()
+      )
+    ) {
       return NextResponse.json(
         {
           success: false,
@@ -252,7 +273,8 @@ export async function POST(request: Request) {
      * If either operation fails, the transaction
      * is rolled back.
      */
-    const session = await RestaurantSubscription.db.startSession();
+    const session =
+      await RestaurantSubscription.db.startSession();
 
     let createdSubscriptionId: string | null = null;
     let createdInvoiceId: string | null = null;
@@ -265,9 +287,7 @@ export async function POST(request: Request) {
               {
                 restaurantId,
                 planId,
-
                 status,
-
                 startDate: subscriptionStartDate,
                 endDate: subscriptionEndDate,
 
@@ -284,7 +304,8 @@ export async function POST(request: Request) {
             { session }
           );
 
-        const subscription = createdSubscriptions[0];
+        const subscription =
+          createdSubscriptions[0];
 
         if (!subscription) {
           throw new Error(
@@ -307,7 +328,8 @@ export async function POST(request: Request) {
               {
                 restaurantId,
                 subscriptionId: subscription._id,
-                invoiceNumber: generateInvoiceNumber(),
+                invoiceNumber:
+                  generateInvoiceNumber(),
 
                 amount: plan.price,
                 currency: "INR",
@@ -338,13 +360,17 @@ export async function POST(request: Request) {
           );
         }
 
-        createdInvoiceId = invoice._id.toString();
+        createdInvoiceId =
+          invoice._id.toString();
       });
     } finally {
       await session.endSession();
     }
 
-    if (!createdSubscriptionId || !createdInvoiceId) {
+    if (
+      !createdSubscriptionId ||
+      !createdInvoiceId
+    ) {
       throw new Error(
         "Subscription and invoice creation failed."
       );
