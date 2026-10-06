@@ -3,14 +3,19 @@ import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/auth";
 import { connectDB } from "@/lib/mongodb";
-import SubscriptionInvoice from "@/models/subscription-invoice";
 import { getRazorpay } from "@/lib/razorpay";
+
+import SubscriptionInvoice from "@/models/subscription-invoice";
+
+interface RouteContext {
+  params: Promise<{
+    id: string;
+  }>;
+}
 
 export async function POST(
   request: Request,
-  context: {
-    params: Promise<{ id: string }>;
-  }
+  context: RouteContext
 ) {
   try {
     const session = await getServerSession(authOptions);
@@ -19,7 +24,7 @@ export async function POST(
       return NextResponse.json(
         {
           success: false,
-          message: "Authentication required.",
+          message: "Unauthorized.",
         },
         { status: 401 }
       );
@@ -29,8 +34,7 @@ export async function POST(
       return NextResponse.json(
         {
           success: false,
-          message:
-            "Forbidden. Super Admin access required.",
+          message: "Forbidden.",
         },
         { status: 403 }
       );
@@ -75,40 +79,31 @@ export async function POST(
     }
 
     /*
-     * If an order already exists for this invoice,
-     * return it instead of creating another order.
+     * If an order already exists, return it.
+     * This prevents duplicate Razorpay orders.
      */
     if (invoice.gatewayOrderId) {
       return NextResponse.json({
         success: true,
-        message:
-          "Existing Razorpay order returned.",
         order: {
           id: invoice.gatewayOrderId,
           amount: Math.round(
             invoice.amount * 100
           ),
           currency: invoice.currency,
-          invoiceId: invoice._id.toString(),
-          invoiceNumber:
-            invoice.invoiceNumber,
         },
+        keyId:
+          process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
       });
     }
 
-    /*
-     * Razorpay expects the amount in the
-     * smallest currency unit.
-     *
-     * Example:
-     *
-     * ₹999 = 99900 paise
-     */
-    const amountInSmallestUnit = Math.round(
+    const razorpay = getRazorpay();
+
+    const amount = Math.round(
       invoice.amount * 100
     );
 
-    if (amountInSmallestUnit <= 0) {
+    if (amount <= 0) {
       return NextResponse.json(
         {
           success: false,
@@ -119,32 +114,23 @@ export async function POST(
       );
     }
 
-    /*
-     * Create Razorpay order.
-     */
-   const razorpay = getRazorpay(); 
-    const order = await razorpay.orders.create({
-      amount: amountInSmallestUnit,
-      currency: invoice.currency,
-      receipt: invoice.invoiceNumber,
-      notes: {
-        invoiceId: invoice._id.toString(),
-        invoiceNumber:
-          invoice.invoiceNumber,
-        restaurantId:
-          invoice.restaurantId.toString(),
-        subscriptionId:
-          invoice.subscriptionId.toString(),
-      },
-    });
+    const order =
+      await razorpay.orders.create({
+        amount,
+        currency: invoice.currency || "INR",
+        receipt: invoice.invoiceNumber,
 
-    /*
-     * Store the Razorpay order ID.
-     *
-     * Do NOT mark the invoice as PAID here.
-     *
-     * Creating an order does NOT mean payment succeeded.
-     */
+        notes: {
+          invoiceId: invoice._id.toString(),
+          invoiceNumber:
+            invoice.invoiceNumber,
+          restaurantId:
+            invoice.restaurantId.toString(),
+          subscriptionId:
+            invoice.subscriptionId.toString(),
+        },
+      });
+
     invoice.paymentGateway = "RAZORPAY";
     invoice.gatewayOrderId = order.id;
 
@@ -153,22 +139,18 @@ export async function POST(
     return NextResponse.json({
       success: true,
 
-      message:
-        "Razorpay order created successfully.",
-
       order: {
         id: order.id,
         amount: order.amount,
         currency: order.currency,
-        invoiceId:
-          invoice._id.toString(),
-        invoiceNumber:
-          invoice.invoiceNumber,
       },
+
+      keyId:
+        process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
     });
   } catch (error) {
     console.error(
-      "Create Razorpay subscription order error:",
+      "Razorpay order creation error:",
       error
     );
 
@@ -176,7 +158,9 @@ export async function POST(
       {
         success: false,
         message:
-          "Failed to create Razorpay order.",
+          error instanceof Error
+            ? error.message
+            : "Failed to create Razorpay order.",
       },
       { status: 500 }
     );
