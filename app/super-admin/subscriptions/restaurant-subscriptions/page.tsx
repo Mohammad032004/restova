@@ -7,6 +7,7 @@ import {
   ChevronDown,
   CreditCard,
   Loader2,
+  MoreHorizontal,
   Plus,
   RefreshCw,
   Store,
@@ -35,16 +36,18 @@ interface SubscriptionPlan {
   isActive: boolean;
 }
 
+type SubscriptionStatus =
+  | "TRIAL"
+  | "ACTIVE"
+  | "EXPIRED"
+  | "CANCELLED"
+  | "SUSPENDED";
+
 interface RestaurantSubscription {
   _id: string;
   restaurantId: Restaurant;
   planId: SubscriptionPlan;
-  status:
-    | "TRIAL"
-    | "ACTIVE"
-    | "EXPIRED"
-    | "CANCELLED"
-    | "SUSPENDED";
+  status: SubscriptionStatus;
   startDate: string;
   endDate: string;
   billingCycle: "MONTHLY" | "YEARLY";
@@ -58,26 +61,38 @@ export default function RestaurantSubscriptionsPage() {
     RestaurantSubscription[]
   >([]);
 
-  const [restaurants, setRestaurants] = useState<Restaurant[]>(
-    []
-  );
+  const [restaurants, setRestaurants] = useState<
+    Restaurant[]
+  >([]);
 
-  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
+  const [plans, setPlans] = useState<
+    SubscriptionPlan[]
+  >([]);
 
   const [loading, setLoading] = useState(true);
   const [assigning, setAssigning] = useState(false);
+  const [updatingId, setUpdatingId] = useState<string | null>(
+    null
+  );
+
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
   const [showAssignForm, setShowAssignForm] =
     useState(false);
 
+  const [openMenuId, setOpenMenuId] = useState<
+    string | null
+  >(null);
+
   const [restaurantId, setRestaurantId] = useState("");
   const [planId, setPlanId] = useState("");
   const [startDate, setStartDate] = useState("");
-  const [status, setStatus] = useState<"ACTIVE" | "TRIAL">(
-    "ACTIVE"
-  );
+
+  const [status, setStatus] = useState<
+    "ACTIVE" | "TRIAL"
+  >("ACTIVE");
+
   const [autoRenew, setAutoRenew] = useState(false);
 
   async function loadData() {
@@ -90,7 +105,9 @@ export default function RestaurantSubscriptionsPage() {
         restaurantsResponse,
         plansResponse,
       ] = await Promise.all([
-        fetch("/api/super-admin/restaurant-subscriptions"),
+        fetch(
+          "/api/super-admin/restaurant-subscriptions"
+        ),
         fetch("/api/super-admin/restaurants"),
         fetch("/api/super-admin/subscription-plans"),
       ]);
@@ -158,8 +175,6 @@ export default function RestaurantSubscriptionsPage() {
     setStartDate("");
     setStatus("ACTIVE");
     setAutoRenew(false);
-    setError("");
-    setSuccess("");
   }
 
   async function handleAssignSubscription(
@@ -210,7 +225,6 @@ export default function RestaurantSubscriptionsPage() {
       );
 
       resetForm();
-
       setShowAssignForm(false);
 
       await loadData();
@@ -222,6 +236,54 @@ export default function RestaurantSubscriptionsPage() {
       );
     } finally {
       setAssigning(false);
+    }
+  }
+
+  async function updateSubscription(
+    id: string,
+    updates: {
+      status?: SubscriptionStatus;
+      autoRenew?: boolean;
+    },
+    successMessage: string
+  ) {
+    try {
+      setUpdatingId(id);
+      setError("");
+      setSuccess("");
+      setOpenMenuId(null);
+
+      const response = await fetch(
+        `/api/super-admin/restaurant-subscriptions/${id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(updates),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            "Failed to update subscription."
+        );
+      }
+
+      setSuccess(successMessage);
+
+      await loadData();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to update subscription."
+      );
+    } finally {
+      setUpdatingId(null);
     }
   }
 
@@ -242,7 +304,7 @@ export default function RestaurantSubscriptionsPage() {
   }
 
   function getStatusClasses(
-    subscriptionStatus: RestaurantSubscription["status"]
+    subscriptionStatus: SubscriptionStatus
   ) {
     switch (subscriptionStatus) {
       case "ACTIVE":
@@ -263,6 +325,19 @@ export default function RestaurantSubscriptionsPage() {
       default:
         return "bg-slate-100 text-slate-700 border-slate-200";
     }
+  }
+
+  function getActionStatus(
+    subscription: RestaurantSubscription
+  ) {
+    if (
+      subscription.status === "ACTIVE" ||
+      subscription.status === "TRIAL"
+    ) {
+      return "ACTIVE";
+    }
+
+    return subscription.status;
   }
 
   const activeSubscriptions = subscriptions.filter(
@@ -287,10 +362,9 @@ export default function RestaurantSubscriptionsPage() {
           subscription.status === "ACTIVE" ||
           subscription.status === "TRIAL"
       )
-      .map((subscription) =>
-        typeof subscription.restaurantId === "object"
-          ? subscription.restaurantId._id
-          : ""
+      .map(
+        (subscription) =>
+          subscription.restaurantId?._id
       );
 
   const availableRestaurants =
@@ -302,7 +376,10 @@ export default function RestaurantSubscriptionsPage() {
     );
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div
+      className="min-h-screen bg-slate-50"
+      onClick={() => setOpenMenuId(null)}
+    >
       <div className="mx-auto max-w-7xl px-6 py-8">
         {/* Header */}
         <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -327,21 +404,30 @@ export default function RestaurantSubscriptionsPage() {
           <div className="flex gap-3">
             <button
               type="button"
-              onClick={loadData}
+              onClick={(event) => {
+                event.stopPropagation();
+                loadData();
+              }}
               disabled={loading}
               className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
             >
               <RefreshCw
                 size={16}
-                className={loading ? "animate-spin" : ""}
+                className={
+                  loading ? "animate-spin" : ""
+                }
               />
               Refresh
             </button>
 
             <button
               type="button"
-              onClick={() => {
+              onClick={(event) => {
+                event.stopPropagation();
+
                 resetForm();
+                setError("");
+                setSuccess("");
                 setShowAssignForm(true);
               }}
               className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
@@ -410,7 +496,12 @@ export default function RestaurantSubscriptionsPage() {
 
         {/* Assign Form */}
         {showAssignForm && (
-          <div className="mb-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div
+            className="mb-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+            onClick={(event) =>
+              event.stopPropagation()
+            }
+          >
             <div className="mb-6 flex items-start justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
@@ -454,7 +545,9 @@ export default function RestaurantSubscriptionsPage() {
                   <select
                     value={restaurantId}
                     onChange={(event) =>
-                      setRestaurantId(event.target.value)
+                      setRestaurantId(
+                        event.target.value
+                      )
                     }
                     className="w-full appearance-none rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-10 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
                   >
@@ -481,7 +574,8 @@ export default function RestaurantSubscriptionsPage() {
                   />
                 </div>
 
-                {availableRestaurants.length === 0 && (
+                {availableRestaurants.length ===
+                  0 && (
                   <p className="mt-2 text-xs text-amber-600">
                     No restaurants are currently
                     available for a new subscription.
@@ -547,7 +641,9 @@ export default function RestaurantSubscriptionsPage() {
                     type="date"
                     value={startDate}
                     onChange={(event) =>
-                      setStartDate(event.target.value)
+                      setStartDate(
+                        event.target.value
+                      )
                     }
                     className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
                   />
@@ -578,6 +674,7 @@ export default function RestaurantSubscriptionsPage() {
                   <option value="ACTIVE">
                     Active
                   </option>
+
                   <option value="TRIAL">
                     Trial
                   </option>
@@ -682,7 +779,7 @@ export default function RestaurantSubscriptionsPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1000px]">
+              <table className="w-full min-w-[1100px]">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50">
                     <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -716,125 +813,341 @@ export default function RestaurantSubscriptionsPage() {
                     <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                       Auto Renew
                     </th>
+
+                    <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {subscriptions.map(
-                    (subscription) => (
-                      <tr
-                        key={subscription._id}
-                        className="border-b border-slate-100 last:border-0 hover:bg-slate-50/70"
-                      >
-                        <td className="px-6 py-5">
-                          <div>
+                    (subscription) => {
+                      const isUpdating =
+                        updatingId ===
+                        subscription._id;
+
+                      const actionStatus =
+                        getActionStatus(
+                          subscription
+                        );
+
+                      return (
+                        <tr
+                          key={subscription._id}
+                          className="border-b border-slate-100 last:border-0 hover:bg-slate-50/70"
+                        >
+                          {/* Restaurant */}
+                          <td className="px-6 py-5">
+                            <div>
+                              <p className="font-medium text-slate-900">
+                                {
+                                  subscription
+                                    .restaurantId
+                                    ?.name
+                                }
+                              </p>
+
+                              <p className="mt-1 text-xs text-slate-500">
+                                {
+                                  subscription
+                                    .restaurantId
+                                    ?.city
+                                }
+                                ,{" "}
+                                {
+                                  subscription
+                                    .restaurantId
+                                    ?.state
+                                }
+                              </p>
+                            </div>
+                          </td>
+
+                          {/* Plan */}
+                          <td className="px-6 py-5">
                             <p className="font-medium text-slate-900">
                               {
                                 subscription
-                                  .restaurantId.name
+                                  .planId?.name
                               }
                             </p>
 
                             <p className="mt-1 text-xs text-slate-500">
                               {
                                 subscription
-                                  .restaurantId.city
-                              }
-                              ,{" "}
+                                  .planId?.maxTables
+                              }{" "}
+                              tables ·{" "}
                               {
                                 subscription
-                                  .restaurantId.state
-                              }
+                                  .planId?.maxStaff
+                              }{" "}
+                              staff
                             </p>
-                          </div>
-                        </td>
+                          </td>
 
-                        <td className="px-6 py-5">
-                          <p className="font-medium text-slate-900">
-                            {subscription.planId.name}
-                          </p>
-
-                          <p className="mt-1 text-xs text-slate-500">
-                            {
-                              subscription
-                                .planId.maxTables
-                            }{" "}
-                            tables ·{" "}
-                            {
-                              subscription
-                                .planId.maxStaff
-                            }{" "}
-                            staff
-                          </p>
-                        </td>
-
-                        <td className="px-6 py-5">
-                          <span className="font-medium text-slate-900">
-                            {formatPrice(
-                              subscription.price
-                            )}
-                          </span>
-                        </td>
-
-                        <td className="px-6 py-5">
-                          <span className="text-sm capitalize text-slate-700">
-                            {subscription.billingCycle.toLowerCase()}
-                          </span>
-                        </td>
-
-                        <td className="px-6 py-5 text-sm text-slate-600">
-                          {formatDate(
-                            subscription.startDate
-                          )}
-                        </td>
-
-                        <td className="px-6 py-5 text-sm text-slate-600">
-                          {formatDate(
-                            subscription.endDate
-                          )}
-                        </td>
-
-                        <td className="px-6 py-5">
-                          <span
-                            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${getStatusClasses(
-                              subscription.status
-                            )}`}
-                          >
-                            {subscription.status ===
-                              "ACTIVE" && (
-                              <CheckCircle2 size={13} />
-                            )}
-
-                            {subscription.status ===
-                              "TRIAL" && (
-                              <CheckCircle2 size={13} />
-                            )}
-
-                            {subscription.status ===
-                              "EXPIRED" && (
-                              <XCircle size={13} />
-                            )}
-
-                            {subscription.status}
-                          </span>
-                        </td>
-
-                        <td className="px-6 py-5">
-                          {subscription.autoRenew ? (
-                            <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600">
-                              <CheckCircle2
-                                size={15}
-                              />
-                              Enabled
+                          {/* Price */}
+                          <td className="px-6 py-5">
+                            <span className="font-medium text-slate-900">
+                              {formatPrice(
+                                subscription.price
+                              )}
                             </span>
-                          ) : (
-                            <span className="text-sm text-slate-500">
-                              Disabled
+                          </td>
+
+                          {/* Billing */}
+                          <td className="px-6 py-5">
+                            <span className="text-sm capitalize text-slate-700">
+                              {subscription.billingCycle.toLowerCase()}
                             </span>
-                          )}
-                        </td>
-                      </tr>
-                    )
+                          </td>
+
+                          {/* Start */}
+                          <td className="px-6 py-5 text-sm text-slate-600">
+                            {formatDate(
+                              subscription.startDate
+                            )}
+                          </td>
+
+                          {/* End */}
+                          <td className="px-6 py-5 text-sm text-slate-600">
+                            {formatDate(
+                              subscription.endDate
+                            )}
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-6 py-5">
+                            <span
+                              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${getStatusClasses(
+                                subscription.status
+                              )}`}
+                            >
+                              {(subscription.status ===
+                                "ACTIVE" ||
+                                subscription.status ===
+                                  "TRIAL") && (
+                                <CheckCircle2
+                                  size={13}
+                                />
+                              )}
+
+                              {(subscription.status ===
+                                "EXPIRED" ||
+                                subscription.status ===
+                                  "CANCELLED") && (
+                                <XCircle size={13} />
+                              )}
+
+                              {subscription.status}
+                            </span>
+                          </td>
+
+                          {/* Auto Renew */}
+                          <td className="px-6 py-5">
+                            {subscription.autoRenew ? (
+                              <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600">
+                                <CheckCircle2
+                                  size={15}
+                                />
+                                Enabled
+                              </span>
+                            ) : (
+                              <span className="text-sm text-slate-500">
+                                Disabled
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Actions */}
+                          <td className="px-6 py-5">
+                            <div className="relative flex justify-end">
+                              <button
+                                type="button"
+                                disabled={isUpdating}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+
+                                  setOpenMenuId(
+                                    openMenuId ===
+                                      subscription._id
+                                      ? null
+                                      : subscription._id
+                                  );
+                                }}
+                                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50"
+                                aria-label="Subscription actions"
+                              >
+                                {isUpdating ? (
+                                  <Loader2
+                                    size={18}
+                                    className="animate-spin"
+                                  />
+                                ) : (
+                                  <MoreHorizontal
+                                    size={18}
+                                  />
+                                )}
+                              </button>
+
+                              {openMenuId ===
+                                subscription._id && (
+                                <div
+                                  className="absolute right-0 top-10 z-20 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl"
+                                  onClick={(event) =>
+                                    event.stopPropagation()
+                                  }
+                                >
+                                  {actionStatus !==
+                                    "ACTIVE" && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateSubscription(
+                                          subscription._id,
+                                          {
+                                            status:
+                                              "ACTIVE",
+                                          },
+                                          "Subscription activated successfully."
+                                        )
+                                      }
+                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                                    >
+                                      <CheckCircle2
+                                        size={16}
+                                        className="text-emerald-600"
+                                      />
+                                      Activate
+                                    </button>
+                                  )}
+
+                                  {subscription.status ===
+                                    "ACTIVE" && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          updateSubscription(
+                                            subscription._id,
+                                            {
+                                              status:
+                                                "SUSPENDED",
+                                            },
+                                            "Subscription suspended successfully."
+                                          )
+                                        }
+                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                                      >
+                                        <XCircle
+                                          size={16}
+                                          className="text-amber-600"
+                                        />
+                                        Suspend
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          updateSubscription(
+                                            subscription._id,
+                                            {
+                                              status:
+                                                "CANCELLED",
+                                            },
+                                            "Subscription cancelled successfully."
+                                          )
+                                        }
+                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-50"
+                                      >
+                                        <XCircle
+                                          size={16}
+                                        />
+                                        Cancel
+                                      </button>
+                                    </>
+                                  )}
+
+                                  {subscription.status ===
+                                    "TRIAL" && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateSubscription(
+                                          subscription._id,
+                                          {
+                                            status:
+                                              "ACTIVE",
+                                          },
+                                          "Trial converted to active subscription."
+                                        )
+                                      }
+                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                                    >
+                                      <CheckCircle2
+                                        size={16}
+                                        className="text-blue-600"
+                                      />
+                                      Convert to Active
+                                    </button>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateSubscription(
+                                        subscription._id,
+                                        {
+                                          autoRenew:
+                                            !subscription.autoRenew,
+                                        },
+                                        subscription.autoRenew
+                                          ? "Auto-renew disabled."
+                                          : "Auto-renew enabled."
+                                      )
+                                    }
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                                  >
+                                    <RefreshCw
+                                      size={16}
+                                      className="text-slate-500"
+                                    />
+                                    {subscription.autoRenew
+                                      ? "Disable Auto Renew"
+                                      : "Enable Auto Renew"}
+                                  </button>
+
+                                  {subscription.status ===
+                                    "EXPIRED" && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateSubscription(
+                                          subscription._id,
+                                          {
+                                            status:
+                                              "ACTIVE",
+                                          },
+                                          "Expired subscription reactivated."
+                                        )
+                                      }
+                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                                    >
+                                      <RefreshCw
+                                        size={16}
+                                        className="text-emerald-600"
+                                      />
+                                      Reactivate
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
                   )}
                 </tbody>
               </table>
