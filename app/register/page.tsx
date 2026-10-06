@@ -16,6 +16,7 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState("");
   const [error, setError] = useState("");
+  const [emailError, setEmailError] = useState("");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -23,6 +24,7 @@ export default function RegisterPage() {
     setLoading(true);
     setSuccess("");
     setError("");
+    setEmailError("");
 
     const form = event.currentTarget;
     const formData = new FormData(form);
@@ -54,6 +56,17 @@ export default function RegisterPage() {
       const result = await response.json();
 
       if (!response.ok) {
+        // Show duplicate email error directly under email field
+        if (
+          response.status === 409 &&
+          typeof result.message === "string" &&
+          result.message.toLowerCase().includes("email")
+        ) {
+          setEmailError(result.message);
+          setLoading(false);
+          return;
+        }
+
         throw new Error(
           result.message || "Failed to submit application."
         );
@@ -101,7 +114,9 @@ export default function RegisterPage() {
             className="text-sm font-medium text-slate-600 transition hover:text-slate-950"
           >
             Already have an account?{" "}
-            <span className="font-semibold text-slate-950">Login</span>
+            <span className="font-semibold text-slate-950">
+              Login
+            </span>
           </Link>
         </div>
       </header>
@@ -128,16 +143,24 @@ export default function RegisterPage() {
           {/* Success */}
           {success && (
             <div className="mb-6 flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 p-4 text-green-800">
-              <CheckCircle2 className="mt-0.5 shrink-0" size={20} />
+              <CheckCircle2
+                className="mt-0.5 shrink-0"
+                size={20}
+              />
 
               <div>
-                <p className="font-semibold">Application submitted</p>
-                <p className="mt-1 text-sm">{success}</p>
+                <p className="font-semibold">
+                  Application submitted
+                </p>
+
+                <p className="mt-1 text-sm">
+                  {success}
+                </p>
               </div>
             </div>
           )}
 
-          {/* Error */}
+          {/* General Error */}
           {error && (
             <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
               {error}
@@ -157,11 +180,13 @@ export default function RegisterPage() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Tell us about the restaurant you want to manage with Restova.
+                  Tell us about the restaurant you want to manage with
+                  Restova.
                 </p>
               </div>
 
               <div className="grid gap-5 sm:grid-cols-2">
+                {/* Restaurant Name */}
                 <div className="sm:col-span-2">
                   <label
                     htmlFor="restaurantName"
@@ -180,6 +205,7 @@ export default function RegisterPage() {
                   />
                 </div>
 
+                {/* Restaurant Type */}
                 <div>
                   <label
                     htmlFor="restaurantType"
@@ -203,11 +229,14 @@ export default function RegisterPage() {
                     <option value="cafe">Cafe</option>
                     <option value="fast-food">Fast Food</option>
                     <option value="bakery">Bakery</option>
-                    <option value="cloud-kitchen">Cloud Kitchen</option>
+                    <option value="cloud-kitchen">
+                      Cloud Kitchen
+                    </option>
                     <option value="other">Other</option>
                   </select>
                 </div>
 
+                {/* Number of Tables */}
                 <div>
                   <label
                     htmlFor="numberOfTables"
@@ -239,11 +268,13 @@ export default function RegisterPage() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  These details will be used to contact the restaurant owner.
+                  These details will be used to contact the restaurant
+                  owner.
                 </p>
               </div>
 
               <div className="grid gap-5 sm:grid-cols-2">
+                {/* Owner Name */}
                 <div className="sm:col-span-2">
                   <label
                     htmlFor="ownerName"
@@ -269,6 +300,7 @@ export default function RegisterPage() {
                   </div>
                 </div>
 
+                {/* Email */}
                 <div>
                   <label
                     htmlFor="email"
@@ -280,7 +312,11 @@ export default function RegisterPage() {
                   <div className="relative">
                     <Mail
                       size={18}
-                      className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+                      className={`absolute left-3.5 top-1/2 -translate-y-1/2 ${
+                        emailError
+                          ? "text-red-500"
+                          : "text-slate-400"
+                      }`}
                     />
 
                     <input
@@ -289,11 +325,37 @@ export default function RegisterPage() {
                       type="email"
                       placeholder="owner@example.com"
                       required
-                      className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-slate-950 focus:ring-2 focus:ring-slate-950/10"
+                      onChange={() => {
+                        if (emailError) {
+                          setEmailError("");
+                        }
+                      }}
+                      className={`w-full rounded-xl border bg-white py-3 pl-10 pr-4 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:ring-2 ${
+                        emailError
+                          ? "border-red-300 focus:border-red-500 focus:ring-red-500/10"
+                          : "border-slate-200 focus:border-slate-950 focus:ring-slate-950/10"
+                      }`}
                     />
                   </div>
+
+                  {/* Email Error */}
+                  {emailError && (
+                    <div className="mt-2 flex items-start gap-2 text-sm text-red-600">
+                      <span className="mt-0.5">●</span>
+
+                      <p>{emailError}</p>
+                    </div>
+                  )}
+
+                  {!emailError && (
+                    <p className="mt-2 text-xs text-slate-400">
+                      This email will be used for your Restova owner
+                      account.
+                    </p>
+                  )}
                 </div>
 
+                {/* Phone */}
                 <div>
                   <label
                     htmlFor="phone"
@@ -336,6 +398,7 @@ export default function RegisterPage() {
               </div>
 
               <div className="grid gap-5 sm:grid-cols-2">
+                {/* Address */}
                 <div className="sm:col-span-2">
                   <label
                     htmlFor="address"
@@ -361,6 +424,7 @@ export default function RegisterPage() {
                   </div>
                 </div>
 
+                {/* City */}
                 <div>
                   <label
                     htmlFor="city"
@@ -379,6 +443,7 @@ export default function RegisterPage() {
                   />
                 </div>
 
+                {/* State */}
                 <div>
                   <label
                     htmlFor="state"
@@ -397,6 +462,7 @@ export default function RegisterPage() {
                   />
                 </div>
 
+                {/* Pincode */}
                 <div>
                   <label
                     htmlFor="pincode"
@@ -430,8 +496,9 @@ export default function RegisterPage() {
               />
 
               <span className="text-sm leading-6 text-slate-600">
-                I confirm that the information provided above is accurate and
-                I agree to the Restova application and onboarding process.
+                I confirm that the information provided above is accurate
+                and I agree to the Restova application and onboarding
+                process.
               </span>
             </label>
 
@@ -441,7 +508,9 @@ export default function RegisterPage() {
               disabled={loading}
               className="mt-8 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {loading ? "Submitting Application..." : "Submit Application"}
+              {loading
+                ? "Submitting Application..."
+                : "Submit Application"}
 
               {!loading && <CheckCircle2 size={18} />}
             </button>
