@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
 import { connectDB } from "@/lib/mongodb";
 import User from "@/models/user";
+import OwnerInvitation from "@/models/OwnerInvitation";
 
 export async function POST(request: Request) {
   try {
@@ -10,7 +12,10 @@ export async function POST(request: Request) {
 
     const { token, password } = body;
 
-    // Basic validation
+    // --------------------------------------------------
+    // 1. Basic validation
+    // --------------------------------------------------
+
     if (!token || typeof token !== "string") {
       return NextResponse.json(
         {
@@ -31,12 +36,16 @@ export async function POST(request: Request) {
       );
     }
 
-    // Password security requirements
+    // --------------------------------------------------
+    // 2. Password security requirements
+    // --------------------------------------------------
+
     if (password.length < 8) {
       return NextResponse.json(
         {
           success: false,
-          message: "Password must be at least 8 characters long.",
+          message:
+            "Password must be at least 8 characters long.",
         },
         { status: 400 }
       );
@@ -46,47 +55,117 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message: "Password cannot exceed 128 characters.",
+          message:
+            "Password cannot exceed 128 characters.",
         },
         { status: 400 }
       );
     }
 
+    // --------------------------------------------------
+    // 3. Connect to MongoDB
+    // --------------------------------------------------
+
     await connectDB();
 
-    // Find user with an active setup token
-    const user = await User.findOne({
-      passwordSetupToken: token,
-      passwordSetupExpires: {
+    // --------------------------------------------------
+    // 4. Hash the token received from the URL
+    // --------------------------------------------------
+
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(token)
+      .digest("hex");
+
+    // --------------------------------------------------
+    // 5. Find active invitation
+    // --------------------------------------------------
+
+    const invitation = await OwnerInvitation.findOne({
+      tokenHash,
+      usedAt: null,
+      expiresAt: {
         $gt: new Date(),
       },
-    }).select(
-      "+passwordSetupToken +passwordSetupExpires +password"
+    });
+
+    if (!invitation) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "This password setup link is invalid or has expired.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 6. Find owner
+    // --------------------------------------------------
+
+    const user = await User.findById(invitation.userId).select(
+      "+password"
     );
 
     if (!user) {
       return NextResponse.json(
         {
           success: false,
-          message: "This password setup link is invalid or has expired.",
+          message:
+            "The account associated with this invitation could not be found.",
+        },
+        { status: 404 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 7. Make sure this is a restaurant owner
+    // --------------------------------------------------
+
+    if (user.role !== "RESTAURANT_OWNER") {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "This invitation is not valid for a restaurant owner account.",
         },
         { status: 400 }
       );
     }
 
-    // Hash password
+    // --------------------------------------------------
+    // 8. Hash password
+    // --------------------------------------------------
+
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Set password
+    // --------------------------------------------------
+    // 9. Set password
+    // --------------------------------------------------
+
     user.password = hashedPassword;
 
-    // Invalidate setup token immediately
+    // Keep the old fields cleared in case an older
+    // invitation existed for this user.
     user.passwordSetupToken = undefined;
     user.passwordSetupExpires = undefined;
 
     user.isActive = true;
 
     await user.save();
+
+    // --------------------------------------------------
+    // 10. Mark invitation as used
+    // --------------------------------------------------
+
+    invitation.usedAt = new Date();
+
+    await invitation.save();
+
+    // --------------------------------------------------
+    // 11. Success
+    // --------------------------------------------------
 
     return NextResponse.json(
       {
@@ -102,7 +181,8 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: false,
-        message: "Something went wrong while setting up your password.",
+        message:
+          "Something went wrong while setting up your password.",
       },
       { status: 500 }
     );
