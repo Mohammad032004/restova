@@ -73,12 +73,19 @@ interface Invoice {
   issueDate: string;
   dueDate?: string;
   paidAt?: string;
-  paymentGateway?: "RAZORPAY" | "OTHER";
+
+  paymentGateway?:
+    | "RAZORPAY"
+    | "DEMO"
+    | "OTHER";
+
   gatewayOrderId?: string;
   gatewayPaymentId?: string;
   notes?: string;
+
   restaurantId?: Restaurant;
   subscriptionId?: Subscription;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -119,7 +126,10 @@ function formatDateTime(date?: string) {
   });
 }
 
-function formatAmount(amount: number, currency = "INR") {
+function formatAmount(
+  amount: number,
+  currency = "INR"
+) {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency,
@@ -171,6 +181,24 @@ function getStatusIcon(status: InvoiceStatus) {
   }
 }
 
+function getGatewayClasses(
+  gateway?: Invoice["paymentGateway"]
+) {
+  switch (gateway) {
+    case "DEMO":
+      return "border-violet-200 bg-violet-50 text-violet-700";
+
+    case "RAZORPAY":
+      return "border-blue-200 bg-blue-50 text-blue-700";
+
+    case "OTHER":
+      return "border-slate-200 bg-slate-100 text-slate-600";
+
+    default:
+      return "border-slate-200 bg-slate-100 text-slate-500";
+  }
+}
+
 export default function SubscriptionInvoiceDetailsPage() {
   const params = useParams();
   const router = useRouter();
@@ -182,10 +210,13 @@ export default function SubscriptionInvoiceDetailsPage() {
         ? params.id[0]
         : "";
 
-  const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [invoice, setInvoice] =
+    useState<Invoice | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  const [demoPaymentLoading, setDemoPaymentLoading] =
+    useState(false);
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -270,7 +301,10 @@ export default function SubscriptionInvoiceDetailsPage() {
 
       setInvoice(result.invoice);
       setSelectedStatus(result.invoice.status);
-      setSuccess("Invoice status updated successfully.");
+
+      setSuccess(
+        "Invoice status updated successfully."
+      );
     } catch (error) {
       console.error(error);
 
@@ -284,11 +318,79 @@ export default function SubscriptionInvoiceDetailsPage() {
     }
   }
 
+  async function handleDemoPayment() {
+    if (!invoice) return;
+
+    if (invoice.status !== "PENDING") {
+      setError(
+        "Only pending invoices can be paid."
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Simulate payment of ${formatAmount(
+        invoice.amount,
+        invoice.currency
+      )} for invoice ${
+        invoice.invoiceNumber
+      }?\n\nNo real money will be charged.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDemoPaymentLoading(true);
+      setError("");
+      setSuccess("");
+
+      const response = await fetch(
+        `/api/super-admin/subscription-invoices/${invoice._id}/demo-payment`,
+        {
+          method: "POST",
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(
+          result.message ||
+            "Failed to process demo payment."
+        );
+      }
+
+      setSuccess(
+        "Demo payment completed successfully."
+      );
+
+      await loadInvoice();
+    } catch (error) {
+      console.error(
+        "Demo payment error:",
+        error
+      );
+
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Failed to process demo payment."
+      );
+    } finally {
+      setDemoPaymentLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="flex items-center gap-3 text-sm text-slate-500">
-          <Loader2 size={20} className="animate-spin" />
+          <Loader2
+            size={20}
+            className="animate-spin"
+          />
           Loading invoice...
         </div>
       </div>
@@ -351,34 +453,74 @@ export default function SubscriptionInvoiceDetailsPage() {
               {getStatusIcon(invoice.status)}
               {invoice.status}
             </span>
+
+            {invoice.paymentGateway && (
+              <span
+                className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${getGatewayClasses(
+                  invoice.paymentGateway
+                )}`}
+              >
+                {invoice.paymentGateway}
+              </span>
+            )}
           </div>
 
           <p className="mt-2 text-sm text-slate-500">
             Subscription billing invoice for{" "}
             <span className="font-semibold text-slate-700">
-              {restaurant?.name || "Unknown restaurant"}
+              {restaurant?.name ||
+                "Unknown restaurant"}
             </span>
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={loadInvoice}
-          disabled={loading}
-          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
-        >
-          <RefreshCw
-            size={16}
-            className={loading ? "animate-spin" : ""}
-          />
-          Refresh
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          {invoice.status === "PENDING" && (
+            <button
+              type="button"
+              onClick={handleDemoPayment}
+              disabled={demoPaymentLoading}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {demoPaymentLoading ? (
+                <Loader2
+                  size={16}
+                  className="animate-spin"
+                />
+              ) : (
+                <CreditCard size={16} />
+              )}
+
+              {demoPaymentLoading
+                ? "Processing..."
+                : "Simulate Demo Payment"}
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={loadInvoice}
+            disabled={loading || demoPaymentLoading}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+          >
+            <RefreshCw
+              size={16}
+              className={
+                loading ? "animate-spin" : ""
+              }
+            />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
       {error && (
         <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          <XCircle size={18} className="mt-0.5 shrink-0" />
+          <XCircle
+            size={18}
+            className="mt-0.5 shrink-0"
+          />
           <div>{error}</div>
         </div>
       )}
@@ -393,10 +535,34 @@ export default function SubscriptionInvoiceDetailsPage() {
         </div>
       )}
 
+      {/* Demo payment notice */}
+      {invoice.status === "PENDING" && (
+        <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+          <div className="flex items-start gap-3">
+            <CreditCard
+              size={18}
+              className="mt-0.5 shrink-0 text-violet-600"
+            />
+
+            <div>
+              <p className="text-sm font-semibold text-violet-900">
+                Demo payment available
+              </p>
+
+              <p className="mt-1 text-sm leading-6 text-violet-700">
+                You can simulate this subscription
+                payment for demonstration purposes.
+                No real money will be charged.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main grid */}
       <div className="grid gap-6 xl:grid-cols-3">
         {/* Invoice overview */}
-        <section className="xl:col-span-2 rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm xl:col-span-2">
           <div className="border-b border-slate-200 p-6">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
@@ -445,7 +611,9 @@ export default function SubscriptionInvoiceDetailsPage() {
               </p>
 
               <p className="mt-1 text-sm text-slate-700">
-                {formatDateTime(invoice.issueDate)}
+                {formatDateTime(
+                  invoice.issueDate
+                )}
               </p>
             </div>
 
@@ -455,7 +623,9 @@ export default function SubscriptionInvoiceDetailsPage() {
               </p>
 
               <p className="mt-1 text-sm text-slate-700">
-                {formatDateTime(invoice.dueDate)}
+                {formatDateTime(
+                  invoice.dueDate
+                )}
               </p>
             </div>
 
@@ -465,7 +635,9 @@ export default function SubscriptionInvoiceDetailsPage() {
               </p>
 
               <p className="mt-1 text-sm text-slate-700">
-                {formatDateTime(invoice.paidAt)}
+                {formatDateTime(
+                  invoice.paidAt
+                )}
               </p>
             </div>
 
@@ -503,11 +675,25 @@ export default function SubscriptionInvoiceDetailsPage() {
               }
               className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 outline-none focus:border-slate-400 focus:bg-white"
             >
-              <option value="PENDING">Pending</option>
-              <option value="PAID">Paid</option>
-              <option value="FAILED">Failed</option>
-              <option value="REFUNDED">Refunded</option>
-              <option value="CANCELLED">Cancelled</option>
+              <option value="PENDING">
+                Pending
+              </option>
+
+              <option value="PAID">
+                Paid
+              </option>
+
+              <option value="FAILED">
+                Failed
+              </option>
+
+              <option value="REFUNDED">
+                Refunded
+              </option>
+
+              <option value="CANCELLED">
+                Cancelled
+              </option>
             </select>
 
             <button
@@ -520,7 +706,10 @@ export default function SubscriptionInvoiceDetailsPage() {
               className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {updating && (
-                <Loader2 size={16} className="animate-spin" />
+                <Loader2
+                  size={16}
+                  className="animate-spin"
+                />
               )}
 
               {updating
@@ -553,11 +742,13 @@ export default function SubscriptionInvoiceDetailsPage() {
           <div className="space-y-5 p-6">
             <div>
               <p className="text-lg font-semibold text-slate-950">
-                {restaurant?.name || "Unknown restaurant"}
+                {restaurant?.name ||
+                  "Unknown restaurant"}
               </p>
 
               <p className="mt-1 text-sm text-slate-500">
-                {restaurant?.type || "Restaurant"}
+                {restaurant?.type ||
+                  "Restaurant"}
               </p>
             </div>
 
@@ -568,8 +759,11 @@ export default function SubscriptionInvoiceDetailsPage() {
               />
 
               <p className="text-sm leading-6 text-slate-600">
-                {restaurant?.address || "Address not available"}
+                {restaurant?.address ||
+                  "Address not available"}
+
                 <br />
+
                 {[
                   restaurant?.city,
                   restaurant?.state,
@@ -596,14 +790,15 @@ export default function SubscriptionInvoiceDetailsPage() {
               </span>
 
               <span className="text-sm font-semibold text-slate-700">
-                {restaurant?.numberOfTables ?? "—"}
+                {restaurant?.numberOfTables ??
+                  "—"}
               </span>
             </div>
           </div>
         </section>
 
         {/* Subscription */}
-        <section className="xl:col-span-2 rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm xl:col-span-2">
           <div className="border-b border-slate-200 p-6">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
@@ -616,7 +811,8 @@ export default function SubscriptionInvoiceDetailsPage() {
                 </h3>
 
                 <p className="text-sm text-slate-500">
-                  Subscription associated with this invoice
+                  Subscription associated with
+                  this invoice
                 </p>
               </div>
             </div>
@@ -649,7 +845,8 @@ export default function SubscriptionInvoiceDetailsPage() {
               </p>
 
               <p className="mt-1 font-semibold text-slate-900">
-                {subscription?.billingCycle || "—"}
+                {subscription?.billingCycle ||
+                  "—"}
               </p>
             </div>
 
@@ -674,7 +871,9 @@ export default function SubscriptionInvoiceDetailsPage() {
               </p>
 
               <p className="mt-1 text-sm text-slate-700">
-                {formatDate(subscription?.startDate)}
+                {formatDate(
+                  subscription?.startDate
+                )}
               </p>
             </div>
 
@@ -684,22 +883,24 @@ export default function SubscriptionInvoiceDetailsPage() {
               </p>
 
               <p className="mt-1 text-sm text-slate-700">
-                {formatDate(subscription?.endDate)}
+                {formatDate(
+                  subscription?.endDate
+                )}
               </p>
             </div>
           </div>
         </section>
 
         {/* Payment information */}
-        <section className="xl:col-span-2 rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm xl:col-span-2">
           <div className="border-b border-slate-200 p-6">
             <h3 className="font-semibold text-slate-950">
               Payment information
             </h3>
 
             <p className="mt-1 text-sm text-slate-500">
-              Gateway information will be populated after payment
-              integration.
+              Payment gateway information and
+              transaction details.
             </p>
           </div>
 
@@ -709,9 +910,16 @@ export default function SubscriptionInvoiceDetailsPage() {
                 Payment gateway
               </p>
 
-              <p className="mt-1 text-sm font-semibold text-slate-700">
-                {invoice.paymentGateway || "Not paid"}
-              </p>
+              <div className="mt-2">
+                <span
+                  className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getGatewayClasses(
+                    invoice.paymentGateway
+                  )}`}
+                >
+                  {invoice.paymentGateway ||
+                    "Not paid"}
+                </span>
+              </div>
             </div>
 
             <div>
@@ -720,7 +928,8 @@ export default function SubscriptionInvoiceDetailsPage() {
               </p>
 
               <p className="mt-1 break-all text-sm text-slate-700">
-                {invoice.gatewayOrderId || "—"}
+                {invoice.gatewayOrderId ||
+                  "—"}
               </p>
             </div>
 
@@ -730,7 +939,8 @@ export default function SubscriptionInvoiceDetailsPage() {
               </p>
 
               <p className="mt-1 break-all text-sm text-slate-700">
-                {invoice.gatewayPaymentId || "—"}
+                {invoice.gatewayPaymentId ||
+                  "—"}
               </p>
             </div>
 
@@ -740,7 +950,9 @@ export default function SubscriptionInvoiceDetailsPage() {
               </p>
 
               <p className="mt-1 text-sm font-semibold text-slate-700">
-                {subscription?.autoRenew ? "Enabled" : "Disabled"}
+                {subscription?.autoRenew
+                  ? "Enabled"
+                  : "Disabled"}
               </p>
             </div>
           </div>
@@ -756,16 +968,20 @@ export default function SubscriptionInvoiceDetailsPage() {
 
           <div className="p-6">
             <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">
-              {invoice.notes || "No notes added."}
+              {invoice.notes ||
+                "No notes added."}
             </p>
           </div>
         </section>
 
         {/* Record information */}
-        <section className="xl:col-span-3 rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm xl:col-span-3">
           <div className="border-b border-slate-200 p-6">
             <div className="flex items-center gap-3">
-              <UserRound size={19} className="text-slate-500" />
+              <UserRound
+                size={19}
+                className="text-slate-500"
+              />
 
               <div>
                 <h3 className="font-semibold text-slate-950">
@@ -796,7 +1012,9 @@ export default function SubscriptionInvoiceDetailsPage() {
               </p>
 
               <p className="mt-1 text-sm text-slate-700">
-                {formatDateTime(invoice.createdAt)}
+                {formatDateTime(
+                  invoice.createdAt
+                )}
               </p>
             </div>
 
@@ -806,7 +1024,9 @@ export default function SubscriptionInvoiceDetailsPage() {
               </p>
 
               <p className="mt-1 text-sm text-slate-700">
-                {formatDateTime(invoice.updatedAt)}
+                {formatDateTime(
+                  invoice.updatedAt
+                )}
               </p>
             </div>
           </div>
