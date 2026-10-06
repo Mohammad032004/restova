@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, Suspense, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   Eye,
@@ -11,7 +11,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 
-export default function SetupPasswordPage() {
+function SetupPasswordForm() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -28,7 +28,9 @@ export default function SetupPasswordPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(
+    event: FormEvent<HTMLFormElement>
+  ) {
     event.preventDefault();
 
     setError("");
@@ -51,16 +53,19 @@ export default function SetupPasswordPage() {
     setLoading(true);
 
     try {
-      const response = await fetch("/api/auth/setup-password", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          token,
-          password,
-        }),
-      });
+      const response = await fetch(
+        "/api/auth/setup-password",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            token,
+            password,
+          }),
+        }
+      );
 
       const data = await response.json();
 
@@ -145,8 +150,10 @@ export default function SetupPasswordPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Password */}
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-5"
+          >
             <div>
               <label
                 htmlFor="password"
@@ -163,7 +170,11 @@ export default function SetupPasswordPage() {
 
                 <input
                   id="password"
-                  type={showPassword ? "text" : "password"}
+                  type={
+                    showPassword
+                      ? "text"
+                      : "password"
+                  }
                   value={password}
                   onChange={(event) =>
                     setPassword(event.target.value)
@@ -178,7 +189,9 @@ export default function SetupPasswordPage() {
                 <button
                   type="button"
                   onClick={() =>
-                    setShowPassword((value) => !value)
+                    setShowPassword(
+                      (value) => !value
+                    )
                   }
                   className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100"
                   aria-label={
@@ -196,7 +209,6 @@ export default function SetupPasswordPage() {
               </div>
             </div>
 
-            {/* Confirm Password */}
             <div>
               <label
                 htmlFor="confirmPassword"
@@ -220,7 +232,9 @@ export default function SetupPasswordPage() {
                   }
                   value={confirmPassword}
                   onChange={(event) =>
-                    setConfirmPassword(event.target.value)
+                    setConfirmPassword(
+                      event.target.value
+                    )
                   }
                   placeholder="Enter password again"
                   autoComplete="new-password"
@@ -252,7 +266,6 @@ export default function SetupPasswordPage() {
               </div>
             </div>
 
-            {/* Submit */}
             <button
               type="submit"
               disabled={!token || loading}
@@ -282,5 +295,27 @@ export default function SetupPasswordPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+function SetupPasswordLoading() {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
+      <div className="flex items-center gap-2 text-sm text-slate-500">
+        <Loader2
+          size={18}
+          className="animate-spin"
+        />
+        Loading password setup...
+      </div>
+    </main>
+  );
+}
+
+export default function SetupPasswordPage() {
+  return (
+    <Suspense fallback={<SetupPasswordLoading />}>
+      <SetupPasswordForm />
+    </Suspense>
   );
 }
