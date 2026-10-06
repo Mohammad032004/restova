@@ -7,6 +7,7 @@ import { connectDB } from "@/lib/mongodb";
 import RestaurantApplication from "@/models/restaurant-application";
 import Restaurant from "@/models/restaurant";
 import User from "@/models/user";
+import OwnerInvitation from "@/models/OwnerInvitation";
 import { sendPasswordSetupEmail } from "@/lib/email";
 
 export async function POST(
@@ -144,6 +145,14 @@ export async function POST(
       Date.now() + 24 * 60 * 60 * 1000
     );
 
+    // Hash token before storing it in database.
+    // The raw token exists only in memory and is sent
+    // through the setup URL.
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(passwordSetupToken)
+      .digest("hex");
+
     // --------------------------------------------------
     // 9. Create restaurant owner
     // --------------------------------------------------
@@ -154,16 +163,17 @@ export async function POST(
       phone: application.phone,
       role: "RESTAURANT_OWNER",
       isActive: true,
-      passwordSetupToken,
-      passwordSetupExpires,
     });
+
+    let restaurant = null;
+    let invitation = null;
 
     try {
       // ------------------------------------------------
       // 10. Create restaurant
       // ------------------------------------------------
 
-      const restaurant = await Restaurant.create({
+      restaurant = await Restaurant.create({
         name: application.restaurantName,
         type: application.restaurantType,
         ownerId: owner._id,
@@ -184,7 +194,21 @@ export async function POST(
       await owner.save();
 
       // ------------------------------------------------
-      // 12. Create password setup URL
+      // 12. Create owner invitation
+      // ------------------------------------------------
+
+      invitation = await OwnerInvitation.create({
+        restaurantId: restaurant._id,
+        userId: owner._id,
+        email: owner.email,
+        tokenHash,
+        expiresAt: passwordSetupExpires,
+        usedAt: null,
+        lastSentAt: new Date(),
+      });
+
+      // ------------------------------------------------
+      // 13. Create password setup URL
       // ------------------------------------------------
 
       const baseUrl =
@@ -195,7 +219,7 @@ export async function POST(
         `${baseUrl}/auth/setup-password?token=${passwordSetupToken}`;
 
       // ------------------------------------------------
-      // 13. Send password setup email
+      // 14. Send password setup email
       // ------------------------------------------------
 
       await sendPasswordSetupEmail({
@@ -205,7 +229,7 @@ export async function POST(
       });
 
       // ------------------------------------------------
-      // 14. Approve application
+      // 15. Approve application
       // ------------------------------------------------
 
       application.status = "APPROVED";
@@ -213,15 +237,38 @@ export async function POST(
       await application.save();
 
       // ------------------------------------------------
-      // 15. Return success
+      // 16. Development logging
+      // ------------------------------------------------
+
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "\n=============================================="
+        );
+        console.log("RESTOVA OWNER PASSWORD SETUP");
+        console.log("==============================================");
+        console.log(`Owner: ${owner.name}`);
+        console.log(`Email: ${owner.email}`);
+        console.log(`Restaurant: ${restaurant.name}`);
+        console.log(`Setup URL: ${setupUrl}`);
+        console.log(
+          `Expires: ${passwordSetupExpires.toISOString()}`
+        );
+        console.log(
+          "==============================================\n"
+        );
+      }
+
+      // ------------------------------------------------
+      // 17. Return success
       // ------------------------------------------------
 
       return NextResponse.json(
         {
           success: true,
           message:
-            "Application approved successfully.",
+            "Application approved successfully. Password setup invitation sent.",
           restaurantId: restaurant._id.toString(),
+          invitationId: invitation._id.toString(),
         },
         {
           status: 200,
@@ -229,8 +276,27 @@ export async function POST(
       );
     } catch (error) {
       // ------------------------------------------------
-      // Rollback owner if restaurant creation or
-      // onboarding fails
+      // Rollback invitation
+      // ------------------------------------------------
+
+      if (invitation?._id) {
+        await OwnerInvitation.findByIdAndDelete(
+          invitation._id
+        );
+      }
+
+      // ------------------------------------------------
+      // Rollback restaurant
+      // ------------------------------------------------
+
+      if (restaurant?._id) {
+        await Restaurant.findByIdAndDelete(
+          restaurant._id
+        );
+      }
+
+      // ------------------------------------------------
+      // Rollback owner
       // ------------------------------------------------
 
       await User.findByIdAndDelete(owner._id);
