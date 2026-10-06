@@ -5,7 +5,16 @@ import { authOptions } from "@/auth";
 import { connectDB } from "@/lib/mongodb";
 import SubscriptionPlan from "@/models/subscription-plan";
 
-async function requireSuperAdmin() {
+type AuthResult =
+  | {
+      authorized: true;
+    }
+  | {
+      authorized: false;
+      response: NextResponse;
+    };
+
+async function requireSuperAdmin(): Promise<AuthResult> {
   const session = await getServerSession(authOptions);
 
   if (!session?.user) {
@@ -27,8 +36,7 @@ async function requireSuperAdmin() {
       response: NextResponse.json(
         {
           success: false,
-          message:
-            "Forbidden. Super Admin access required.",
+          message: "Forbidden. Super Admin access required.",
         },
         { status: 403 }
       ),
@@ -37,7 +45,6 @@ async function requireSuperAdmin() {
 
   return {
     authorized: true,
-    response: null,
   };
 }
 
