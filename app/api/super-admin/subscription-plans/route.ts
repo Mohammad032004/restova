@@ -5,29 +5,48 @@ import { authOptions } from "@/auth";
 import { connectDB } from "@/lib/mongodb";
 import SubscriptionPlan from "@/models/subscription-plan";
 
-export async function GET() {
-  try {
-    const session = await getServerSession(authOptions);
+async function requireSuperAdmin() {
+  const session = await getServerSession(authOptions);
 
-    if (!session?.user) {
-      return NextResponse.json(
+  if (!session?.user) {
+    return {
+      authorized: false,
+      response: NextResponse.json(
         {
           success: false,
           message: "Authentication required.",
         },
         { status: 401 }
-      );
-    }
+      ),
+    };
+  }
 
-    if (session.user.role !== "SUPER_ADMIN") {
-      return NextResponse.json(
+  if (session.user.role !== "SUPER_ADMIN") {
+    return {
+      authorized: false,
+      response: NextResponse.json(
         {
           success: false,
           message:
             "Forbidden. Super Admin access required.",
         },
         { status: 403 }
-      );
+      ),
+    };
+  }
+
+  return {
+    authorized: true,
+    response: null,
+  };
+}
+
+export async function GET() {
+  try {
+    const auth = await requireSuperAdmin();
+
+    if (!auth.authorized) {
+      return auth.response;
     }
 
     await connectDB();
@@ -58,27 +77,10 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const auth = await requireSuperAdmin();
 
-    if (!session?.user) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Authentication required.",
-        },
-        { status: 401 }
-      );
-    }
-
-    if (session.user.role !== "SUPER_ADMIN") {
-      return NextResponse.json(
-        {
-          success: false,
-          message:
-            "Forbidden. Super Admin access required.",
-        },
-        { status: 403 }
-      );
+    if (!auth.authorized) {
+      return auth.response;
     }
 
     const body = await request.json();
@@ -134,7 +136,8 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message: "Price must be a valid non-negative number.",
+          message:
+            "Price must be a valid non-negative number.",
         },
         { status: 400 }
       );
@@ -168,6 +171,18 @@ export async function POST(request: Request) {
       );
     }
 
+    const normalizedName = name.trim();
+
+    if (!normalizedName) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Plan name is required.",
+        },
+        { status: 400 }
+      );
+    }
+
     const normalizedFeatures = Array.isArray(features)
       ? features
           .filter(
@@ -182,7 +197,7 @@ export async function POST(request: Request) {
 
     const existingPlan =
       await SubscriptionPlan.findOne({
-        name: name.trim(),
+        name: normalizedName,
         billingCycle,
       });
 
@@ -198,7 +213,7 @@ export async function POST(request: Request) {
     }
 
     const plan = await SubscriptionPlan.create({
-      name: name.trim(),
+      name: normalizedName,
       description:
         typeof description === "string"
           ? description.trim()
@@ -214,7 +229,8 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: true,
-        message: "Subscription plan created successfully.",
+        message:
+          "Subscription plan created successfully.",
         plan,
       },
       { status: 201 }
@@ -228,7 +244,8 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: false,
-        message: "Failed to create subscription plan.",
+        message:
+          "Failed to create subscription plan.",
       },
       { status: 500 }
     );
