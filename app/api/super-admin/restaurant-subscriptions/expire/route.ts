@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/auth";
 import { connectDB } from "@/lib/mongodb";
-import RestaurantSubscription from "@/models/restaurant-subscription";
+import { processExpiredSubscriptions } from "@/lib/subscription-renewal";
 
 export async function POST() {
   try {
@@ -23,8 +23,7 @@ export async function POST() {
       return NextResponse.json(
         {
           success: false,
-          message:
-            "Forbidden. Super Admin access required.",
+          message: "Forbidden. Super Admin access required.",
         },
         { status: 403 }
       );
@@ -32,30 +31,13 @@ export async function POST() {
 
     await connectDB();
 
-    const now = new Date();
-
-    const result =
-      await RestaurantSubscription.updateMany(
-        {
-          status: {
-            $in: ["ACTIVE", "TRIAL"],
-          },
-          endDate: {
-            $lte: now,
-          },
-        },
-        {
-          $set: {
-            status: "EXPIRED",
-            autoRenew: false,
-          },
-        }
-      );
+    const result = await processExpiredSubscriptions();
 
     return NextResponse.json({
       success: true,
-      message: "Expired subscriptions processed.",
-      expiredCount: result.modifiedCount,
+      message:
+        "Subscription expiry and renewal processing completed.",
+      ...result,
     });
   } catch (error) {
     console.error(
