@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -8,8 +10,71 @@ import {
   Phone,
   User,
 } from "lucide-react";
+import { FormEvent, useState } from "react";
 
 export default function RegisterPage() {
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState("");
+  const [error, setError] = useState("");
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setLoading(true);
+    setSuccess("");
+    setError("");
+
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+
+    const data = {
+      restaurantName: formData.get("restaurantName"),
+      restaurantType: formData.get("restaurantType"),
+      numberOfTables: formData.get("numberOfTables"),
+
+      ownerName: formData.get("ownerName"),
+      email: formData.get("email"),
+      phone: formData.get("phone"),
+
+      address: formData.get("address"),
+      city: formData.get("city"),
+      state: formData.get("state"),
+      pincode: formData.get("pincode"),
+    };
+
+    try {
+      const response = await fetch("/api/applications", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.message || "Failed to submit application."
+        );
+      }
+
+      setSuccess(
+        "Your application has been submitted successfully. Our team will review it shortly."
+      );
+
+      form.reset();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-slate-50">
       {/* Header */}
@@ -60,8 +125,30 @@ export default function RegisterPage() {
             </p>
           </div>
 
+          {/* Success */}
+          {success && (
+            <div className="mb-6 flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 p-4 text-green-800">
+              <CheckCircle2 className="mt-0.5 shrink-0" size={20} />
+
+              <div>
+                <p className="font-semibold">Application submitted</p>
+                <p className="mt-1 text-sm">{success}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
           {/* Application Form */}
-          <form className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+          <form
+            onSubmit={handleSubmit}
+            className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
+          >
             {/* Restaurant Information */}
             <div>
               <div className="mb-6">
@@ -105,9 +192,13 @@ export default function RegisterPage() {
                     id="restaurantType"
                     name="restaurantType"
                     required
+                    defaultValue=""
                     className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-slate-950 focus:ring-2 focus:ring-slate-950/10"
                   >
-                    <option value="">Select type</option>
+                    <option value="" disabled>
+                      Select type
+                    </option>
+
                     <option value="restaurant">Restaurant</option>
                     <option value="cafe">Cafe</option>
                     <option value="fast-food">Fast Food</option>
@@ -347,10 +438,12 @@ export default function RegisterPage() {
             {/* Submit */}
             <button
               type="submit"
-              className="mt-8 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+              disabled={loading}
+              className="mt-8 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Submit Application
-              <CheckCircle2 size={18} />
+              {loading ? "Submitting Application..." : "Submit Application"}
+
+              {!loading && <CheckCircle2 size={18} />}
             </button>
 
             <p className="mt-4 text-center text-xs leading-5 text-slate-500">
@@ -358,6 +451,17 @@ export default function RegisterPage() {
               before your restaurant account is created.
             </p>
           </form>
+
+          {/* Back */}
+          <div className="mt-6 text-center">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-950"
+            >
+              <ArrowLeft size={16} />
+              Back to Restova
+            </Link>
+          </div>
         </div>
       </section>
     </main>
