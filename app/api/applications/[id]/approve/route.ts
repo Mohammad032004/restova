@@ -1,34 +1,85 @@
 import { NextResponse } from "next/server";
-import mongoose from "mongoose";
+import { getServerSession } from "next-auth";
 import crypto from "crypto";
 
+import { authOptions } from "@/auth";
 import { connectDB } from "@/lib/mongodb";
 import RestaurantApplication from "@/models/restaurant-application";
 import Restaurant from "@/models/restaurant";
 import User from "@/models/user";
+import { sendPasswordSetupEmail } from "@/lib/email";
 
 export async function POST(
   request: Request,
-  context: { params: Promise<{ id: string }> }
+  context: {
+    params: Promise<{ id: string }>;
+  }
 ) {
   try {
-    const { id } = await context.params;
+    // --------------------------------------------------
+    // 1. Authentication
+    // --------------------------------------------------
 
-    // Validate application ID
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user) {
       return NextResponse.json(
         {
           success: false,
-          message: "Invalid application ID.",
+          message: "Authentication required.",
         },
-        { status: 400 }
+        {
+          status: 401,
+        }
       );
     }
 
+    // --------------------------------------------------
+    // 2. Authorization
+    // --------------------------------------------------
+
+    if (session.user.role !== "SUPER_ADMIN") {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Forbidden. Super Admin access required.",
+        },
+        {
+          status: 403,
+        }
+      );
+    }
+
+    // --------------------------------------------------
+    // 3. Get application ID
+    // --------------------------------------------------
+
+    const { id } = await context.params;
+
+    if (!id) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Application ID is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    // --------------------------------------------------
+    // 4. Connect to MongoDB
+    // --------------------------------------------------
+
     await connectDB();
 
-    // Find application
-    const application = await RestaurantApplication.findById(id);
+    // --------------------------------------------------
+    // 5. Find application
+    // --------------------------------------------------
+
+    const application =
+      await RestaurantApplication.findById(id);
 
     if (!application) {
       return NextResponse.json(
@@ -36,24 +87,37 @@ export async function POST(
           success: false,
           message: "Application not found.",
         },
-        { status: 404 }
+        {
+          status: 404,
+        }
       );
     }
 
-    // Only pending applications can be approved
+    // --------------------------------------------------
+    // 6. Make sure application is still pending
+    // --------------------------------------------------
+
     if (application.status !== "PENDING") {
       return NextResponse.json(
         {
           success: false,
-          message: "Only pending applications can be approved.",
+          message: `Application has already been ${application.status.toLowerCase()}.`,
         },
-        { status: 409 }
+        {
+          status: 400,
+        }
       );
     }
 
-    // Check whether owner email already exists
+    // --------------------------------------------------
+    // 7. Check whether owner already exists
+    // --------------------------------------------------
+
+    const normalizedEmail =
+      application.email.toLowerCase().trim();
+
     const existingUser = await User.findOne({
-      email: application.email,
+      email: normalizedEmail,
     });
 
     if (existingUser) {
@@ -61,95 +125,133 @@ export async function POST(
         {
           success: false,
           message:
-            "A user with this email address already exists.",
+            "A user with this email already exists.",
         },
-        { status: 409 }
+        {
+          status: 409,
+        }
       );
     }
 
-    // Generate secure password setup token
-    const passwordSetupToken = crypto.randomBytes(32).toString("hex");
+    // --------------------------------------------------
+    // 8. Generate secure password setup token
+    // --------------------------------------------------
+
+    const passwordSetupToken =
+      crypto.randomBytes(32).toString("hex");
 
     const passwordSetupExpires = new Date(
-      Date.now() + 1000 * 60 * 60 * 24
+      Date.now() + 24 * 60 * 60 * 1000
     );
 
-    // Create owner
+    // --------------------------------------------------
+    // 9. Create restaurant owner
+    // --------------------------------------------------
+
     const owner = await User.create({
       name: application.ownerName,
-      email: application.email,
+      email: normalizedEmail,
       phone: application.phone,
-
       role: "RESTAURANT_OWNER",
-
       isActive: true,
-
       passwordSetupToken,
       passwordSetupExpires,
     });
 
     try {
-      // Create restaurant
+      // ------------------------------------------------
+      // 10. Create restaurant
+      // ------------------------------------------------
+
       const restaurant = await Restaurant.create({
         name: application.restaurantName,
         type: application.restaurantType,
-
         ownerId: owner._id,
-
         address: application.address,
         city: application.city,
         state: application.state,
         pincode: application.pincode,
-
         numberOfTables: application.numberOfTables,
-
         status: "ACTIVE",
       });
 
-      // Connect owner to restaurant
+      // ------------------------------------------------
+      // 11. Connect owner to restaurant
+      // ------------------------------------------------
+
       owner.restaurantId = restaurant._id;
 
       await owner.save();
 
-      // Mark application approved
+      // ------------------------------------------------
+      // 12. Create password setup URL
+      // ------------------------------------------------
+
+      const baseUrl =
+        process.env.NEXTAUTH_URL ||
+        "http://localhost:3000";
+
+      const setupUrl =
+        `${baseUrl}/auth/setup-password?token=${passwordSetupToken}`;
+
+      // ------------------------------------------------
+      // 13. Send password setup email
+      // ------------------------------------------------
+
+      await sendPasswordSetupEmail({
+        ownerName: owner.name,
+        ownerEmail: owner.email,
+        setupUrl,
+      });
+
+      // ------------------------------------------------
+      // 14. Approve application
+      // ------------------------------------------------
+
       application.status = "APPROVED";
 
       await application.save();
+
+      // ------------------------------------------------
+      // 15. Return success
+      // ------------------------------------------------
 
       return NextResponse.json(
         {
           success: true,
           message:
-            "Application approved and restaurant owner created successfully.",
-
-          applicationId: application._id,
-          restaurantId: restaurant._id,
-          ownerId: owner._id,
-
-          // Temporary for development.
-          // We will remove this from the API response
-          // before production.
-          passwordSetupToken,
+            "Application approved successfully.",
+          restaurantId: restaurant._id.toString(),
         },
-        { status: 200 }
+        {
+          status: 200,
+        }
       );
     } catch (error) {
-      // If restaurant creation fails after owner creation,
-      // remove the owner so we don't leave an incomplete account.
+      // ------------------------------------------------
+      // Rollback owner if restaurant creation or
+      // onboarding fails
+      // ------------------------------------------------
+
       await User.findByIdAndDelete(owner._id);
 
       throw error;
     }
   } catch (error) {
-    console.error("Approve application error:", error);
+    console.error(
+      "Approve application error:",
+      error
+    );
 
     return NextResponse.json(
       {
         success: false,
         message:
-          "Something went wrong while approving the application.",
+          "Failed to approve application.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
