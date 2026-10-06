@@ -60,12 +60,22 @@ interface SubscriptionInvoice {
   issueDate: string;
   dueDate?: string;
   paidAt?: string;
-  paymentGateway?: "RAZORPAY" | "OTHER";
+
+  /**
+   * Payment gateway used for the invoice.
+   *
+   * DEMO is temporary and will be removed
+   * when real Razorpay billing is fully enabled.
+   */
+  paymentGateway?: "RAZORPAY" | "DEMO" | "OTHER";
+
   gatewayOrderId?: string;
   gatewayPaymentId?: string;
   notes?: string;
+
   restaurantId?: Restaurant;
   subscriptionId?: RestaurantSubscription;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -164,10 +174,43 @@ function getStatusIcon(status: SubscriptionInvoice["status"]) {
   }
 }
 
+function getGatewayClasses(gateway?: SubscriptionInvoice["paymentGateway"]) {
+  switch (gateway) {
+    case "RAZORPAY":
+      return "bg-indigo-50 text-indigo-700 border-indigo-200";
+
+    case "DEMO":
+      return "bg-violet-50 text-violet-700 border-violet-200";
+
+    case "OTHER":
+      return "bg-slate-100 text-slate-700 border-slate-200";
+
+    default:
+      return "bg-slate-50 text-slate-400 border-slate-200";
+  }
+}
+
+function getGatewayLabel(gateway?: SubscriptionInvoice["paymentGateway"]) {
+  switch (gateway) {
+    case "RAZORPAY":
+      return "Razorpay";
+
+    case "DEMO":
+      return "Demo";
+
+    case "OTHER":
+      return "Other";
+
+    default:
+      return "Not paid";
+  }
+}
+
 export default function SubscriptionInvoicesPage() {
   const [invoices, setInvoices] = useState<SubscriptionInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] =
     useState<InvoiceStatus>("ALL");
@@ -214,15 +257,19 @@ export default function SubscriptionInvoicesPage() {
   const statistics = useMemo(() => {
     return {
       total: invoices.length,
+
       pending: invoices.filter(
         (invoice) => invoice.status === "PENDING"
       ).length,
+
       paid: invoices.filter(
         (invoice) => invoice.status === "PAID"
       ).length,
+
       failed: invoices.filter(
         (invoice) => invoice.status === "FAILED"
       ).length,
+
       refunded: invoices.filter(
         (invoice) => invoice.status === "REFUNDED"
       ).length,
@@ -257,11 +304,23 @@ export default function SubscriptionInvoicesPage() {
       const gateway =
         invoice.paymentGateway?.toLowerCase() || "";
 
+      const gatewayLabel =
+        getGatewayLabel(invoice.paymentGateway).toLowerCase();
+
+      const gatewayOrderId =
+        invoice.gatewayOrderId?.toLowerCase() || "";
+
+      const gatewayPaymentId =
+        invoice.gatewayPaymentId?.toLowerCase() || "";
+
       return (
         invoiceNumber.includes(normalizedSearch) ||
         restaurantName.includes(normalizedSearch) ||
         city.includes(normalizedSearch) ||
-        gateway.includes(normalizedSearch)
+        gateway.includes(normalizedSearch) ||
+        gatewayLabel.includes(normalizedSearch) ||
+        gatewayOrderId.includes(normalizedSearch) ||
+        gatewayPaymentId.includes(normalizedSearch)
       );
     });
   }, [invoices, search, statusFilter]);
@@ -305,7 +364,10 @@ export default function SubscriptionInvoicesPage() {
       {/* Error */}
       {error && (
         <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          <XCircle className="mt-0.5 shrink-0" size={18} />
+          <XCircle
+            className="mt-0.5 shrink-0"
+            size={18}
+          />
 
           <div className="flex-1">
             <p className="font-semibold">
@@ -390,8 +452,10 @@ export default function SubscriptionInvoicesPage() {
             <input
               type="text"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search invoice, restaurant, city..."
+              onChange={(event) =>
+                setSearch(event.target.value)
+              }
+              placeholder="Search invoice, restaurant, city, gateway..."
               className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:bg-white"
             />
           </div>
@@ -442,7 +506,10 @@ export default function SubscriptionInvoicesPage() {
         {loading ? (
           <div className="flex min-h-72 items-center justify-center">
             <div className="flex items-center gap-3 text-sm text-slate-500">
-              <Loader2 size={20} className="animate-spin" />
+              <Loader2
+                size={20}
+                className="animate-spin"
+              />
               Loading invoices...
             </div>
           </div>
@@ -464,7 +531,7 @@ export default function SubscriptionInvoicesPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-[1100px] w-full">
+            <table className="min-w-[1150px] w-full">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
                   <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -523,7 +590,8 @@ export default function SubscriptionInvoicesPage() {
 
                     <td className="px-5 py-4">
                       <p className="font-medium text-slate-900">
-                        {invoice.restaurantId?.name || "Unknown restaurant"}
+                        {invoice.restaurantId?.name ||
+                          "Unknown restaurant"}
                       </p>
 
                       <p className="mt-1 text-xs text-slate-500">
@@ -542,6 +610,10 @@ export default function SubscriptionInvoicesPage() {
                           invoice.amount,
                           invoice.currency
                         )}
+                      </p>
+
+                      <p className="mt-1 text-xs text-slate-400">
+                        {invoice.currency}
                       </p>
                     </td>
 
@@ -566,9 +638,24 @@ export default function SubscriptionInvoicesPage() {
 
                     <td className="px-5 py-4">
                       {invoice.paymentGateway ? (
-                        <span className="text-sm font-medium text-slate-700">
-                          {invoice.paymentGateway}
-                        </span>
+                        <div className="flex flex-col items-start gap-1.5">
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getGatewayClasses(
+                              invoice.paymentGateway
+                            )}`}
+                          >
+                            {getGatewayLabel(
+                              invoice.paymentGateway
+                            )}
+                          </span>
+
+                          {invoice.paymentGateway ===
+                            "DEMO" && (
+                            <span className="text-[10px] font-medium text-violet-500">
+                              Test payment
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-sm text-slate-400">
                           Not paid
