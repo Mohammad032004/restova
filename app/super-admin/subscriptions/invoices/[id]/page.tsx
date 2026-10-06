@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import Script from "next/script";
+import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+
 import {
   ArrowLeft,
   CheckCircle2,
@@ -13,7 +15,6 @@ import {
   MapPin,
   RefreshCw,
   Store,
-  UserRound,
   X,
   XCircle,
 } from "lucide-react";
@@ -64,20 +65,19 @@ interface Invoice {
   invoiceNumber: string;
   amount: number;
   currency: string;
+
   status:
     | "PENDING"
     | "PAID"
     | "FAILED"
     | "REFUNDED"
     | "CANCELLED";
+
   issueDate: string;
   dueDate?: string;
   paidAt?: string;
 
-  paymentGateway?:
-    | "RAZORPAY"
-    | "DEMO"
-    | "OTHER";
+  paymentGateway?: "RAZORPAY" | "DEMO" | "OTHER";
 
   gatewayOrderId?: string;
   gatewayPaymentId?: string;
@@ -88,6 +88,62 @@ interface Invoice {
 
   createdAt: string;
   updatedAt: string;
+}
+
+interface RazorpaySuccessResponse {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}
+
+interface RazorpayPaymentFailedResponse {
+  error?: {
+    code?: string;
+    description?: string;
+    source?: string;
+    step?: string;
+    reason?: string;
+  };
+}
+
+interface RazorpayCheckoutOptions {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  order_id: string;
+
+  handler: (
+    response: RazorpaySuccessResponse
+  ) => void | Promise<void>;
+
+  modal?: {
+    ondismiss?: () => void;
+  };
+
+  theme?: {
+    color?: string;
+  };
+}
+
+interface RazorpayInstance {
+  open: () => void;
+
+  on: (
+    event: string,
+    handler: (
+      response: RazorpayPaymentFailedResponse
+    ) => void
+  ) => void;
+}
+
+declare global {
+  interface Window {
+    Razorpay?: new (
+      options: RazorpayCheckoutOptions
+    ) => RazorpayInstance;
+  }
 }
 
 type InvoiceStatus = Invoice["status"];
@@ -201,7 +257,6 @@ function getGatewayClasses(
 
 export default function SubscriptionInvoiceDetailsPage() {
   const params = useParams();
-  const router = useRouter();
 
   const id =
     typeof params.id === "string"
@@ -215,7 +270,11 @@ export default function SubscriptionInvoiceDetailsPage() {
 
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+
   const [demoPaymentLoading, setDemoPaymentLoading] =
+    useState(false);
+
+  const [razorpayLoading, setRazorpayLoading] =
     useState(false);
 
   const [error, setError] = useState("");
@@ -322,9 +381,7 @@ export default function SubscriptionInvoiceDetailsPage() {
     if (!invoice) return;
 
     if (invoice.status !== "PENDING") {
-      setError(
-        "Only pending invoices can be paid."
-      );
+      setError("Only pending invoices can be paid.");
       return;
     }
 
@@ -383,6 +440,195 @@ export default function SubscriptionInvoiceDetailsPage() {
     }
   }
 
+  async function handleRazorpayPayment() {
+    if (!invoice) return;
+
+    if (invoice.status !== "PENDING") {
+      setError("Only pending invoices can be paid.");
+      return;
+    }
+
+    if (!window.Razorpay) {
+      setError(
+        "Razorpay Checkout is still loading. Please try again."
+      );
+      return;
+    }
+
+    try {
+      setRazorpayLoading(true);
+      setError("");
+      setSuccess("");
+
+      // Step 1: Ask our server to create a Razorpay order
+      const orderResponse = await fetch(
+        `/api/super-admin/subscription-invoices/${invoice._id}/razorpay`,
+        {
+          method: "POST",
+        }
+      );
+
+      const orderResult = await orderResponse.json();
+
+      if (
+        !orderResponse.ok ||
+        !orderResult.success
+      ) {
+        throw new Error(
+          orderResult.message ||
+            "Failed to create Razorpay order."
+        );
+      }
+
+      const order = orderResult.order;
+
+      if (!order?.id) {
+        throw new Error(
+          "Razorpay order ID was not returned."
+        );
+      }
+
+      const razorpayKey =
+        orderResult.keyId ||
+        process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+
+      if (!razorpayKey) {
+        throw new Error(
+          "Razorpay key is not configured."
+        );
+      }
+
+      // Step 2: Open Razorpay Checkout
+      const options: RazorpayCheckoutOptions = {
+        key: razorpayKey,
+
+        amount: order.amount,
+
+        currency:
+          order.currency ||
+          invoice.currency ||
+          "INR",
+
+        name: "Restova",
+
+        description:
+          `Subscription Invoice ${invoice.invoiceNumber}`,
+
+        order_id: order.id,
+
+        handler: async (
+          response: RazorpaySuccessResponse
+        ) => {
+          try {
+            setError("");
+            setSuccess("");
+
+            // Step 3: Verify payment on our server
+            const verifyResponse = await fetch(
+              `/api/super-admin/subscription-invoices/${invoice._id}/razorpay/verify`,
+              {
+                method: "POST",
+
+                headers: {
+                  "Content-Type": "application/json",
+                },
+
+                body: JSON.stringify({
+                  razorpayOrderId:
+                    response.razorpay_order_id,
+
+                  razorpayPaymentId:
+                    response.razorpay_payment_id,
+
+                  razorpaySignature:
+                    response.razorpay_signature,
+                }),
+              }
+            );
+
+            const verifyResult =
+              await verifyResponse.json();
+
+            if (
+              !verifyResponse.ok ||
+              !verifyResult.success
+            ) {
+              throw new Error(
+                verifyResult.message ||
+                  "Payment verification failed."
+              );
+            }
+
+            setSuccess(
+              "Razorpay payment completed successfully."
+            );
+
+            await loadInvoice();
+          } catch (error) {
+            console.error(
+              "Razorpay verification error:",
+              error
+            );
+
+            setError(
+              error instanceof Error
+                ? error.message
+                : "Payment verification failed."
+            );
+          } finally {
+            setRazorpayLoading(false);
+          }
+        },
+
+        modal: {
+          ondismiss: () => {
+            setRazorpayLoading(false);
+          },
+        },
+
+        theme: {
+          color: "#0f172a",
+        },
+      };
+
+      const razorpay =
+        new window.Razorpay(options);
+
+      // Handle payment failure on the checkout
+      razorpay.on(
+        "payment.failed",
+        (response) => {
+          console.error(
+            "Razorpay payment failed:",
+            response
+          );
+
+          setError(
+            response.error?.description ||
+              "Razorpay payment failed."
+          );
+
+          setRazorpayLoading(false);
+        }
+      );
+
+      razorpay.open();
+    } catch (error) {
+      console.error(
+        "Razorpay payment error:",
+        error
+      );
+
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Failed to start Razorpay payment."
+      );
+
+      setRazorpayLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -391,6 +637,7 @@ export default function SubscriptionInvoiceDetailsPage() {
             size={20}
             className="animate-spin"
           />
+
           Loading invoice...
         </div>
       </div>
@@ -405,6 +652,7 @@ export default function SubscriptionInvoiceDetailsPage() {
           className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-950"
         >
           <ArrowLeft size={16} />
+
           Back to invoices
         </Link>
 
@@ -413,7 +661,9 @@ export default function SubscriptionInvoiceDetailsPage() {
             Unable to load invoice
           </p>
 
-          <p className="mt-1">{error}</p>
+          <p className="mt-1">
+            {error}
+          </p>
         </div>
       </div>
     );
@@ -428,610 +678,603 @@ export default function SubscriptionInvoiceDetailsPage() {
   const plan = subscription?.planId;
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <Link
-            href="/super-admin/subscriptions/invoices"
-            className="mb-4 inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-950"
-          >
-            <ArrowLeft size={16} />
-            Back to invoices
-          </Link>
+    <>
+      <Script
+        src="https://checkout.razorpay.com/v1/checkout.js"
+        strategy="afterInteractive"
+      />
 
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 className="text-2xl font-bold tracking-tight text-slate-950">
-              {invoice.invoiceNumber}
-            </h2>
+      <div className="space-y-8">
 
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${getStatusClasses(
-                invoice.status
-              )}`}
+        {/* Header */}
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <Link
+              href="/super-admin/subscriptions/invoices"
+              className="mb-4 inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-950"
             >
-              {getStatusIcon(invoice.status)}
-              {invoice.status}
-            </span>
+              <ArrowLeft size={16} />
 
-            {invoice.paymentGateway && (
+              Back to invoices
+            </Link>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-2xl font-bold tracking-tight text-slate-950">
+                {invoice.invoiceNumber}
+              </h2>
+
               <span
-                className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${getGatewayClasses(
-                  invoice.paymentGateway
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${getStatusClasses(
+                  invoice.status
                 )}`}
               >
-                {invoice.paymentGateway}
-              </span>
-            )}
-          </div>
+                {getStatusIcon(invoice.status)}
 
-          <p className="mt-2 text-sm text-slate-500">
-            Subscription billing invoice for{" "}
-            <span className="font-semibold text-slate-700">
-              {restaurant?.name ||
-                "Unknown restaurant"}
-            </span>
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          {invoice.status === "PENDING" && (
-            <button
-              type="button"
-              onClick={handleDemoPayment}
-              disabled={demoPaymentLoading}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {demoPaymentLoading ? (
-                <Loader2
-                  size={16}
-                  className="animate-spin"
-                />
-              ) : (
-                <CreditCard size={16} />
-              )}
-
-              {demoPaymentLoading
-                ? "Processing..."
-                : "Simulate Demo Payment"}
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={loadInvoice}
-            disabled={loading || demoPaymentLoading}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
-          >
-            <RefreshCw
-              size={16}
-              className={
-                loading ? "animate-spin" : ""
-              }
-            />
-            Refresh
-          </button>
-        </div>
-      </div>
-
-      {/* Messages */}
-      {error && (
-        <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          <XCircle
-            size={18}
-            className="mt-0.5 shrink-0"
-          />
-          <div>{error}</div>
-        </div>
-      )}
-
-      {success && (
-        <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
-          <CheckCircle2
-            size={18}
-            className="mt-0.5 shrink-0"
-          />
-          <div>{success}</div>
-        </div>
-      )}
-
-      {/* Demo payment notice */}
-      {invoice.status === "PENDING" && (
-        <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
-          <div className="flex items-start gap-3">
-            <CreditCard
-              size={18}
-              className="mt-0.5 shrink-0 text-violet-600"
-            />
-
-            <div>
-              <p className="text-sm font-semibold text-violet-900">
-                Demo payment available
-              </p>
-
-              <p className="mt-1 text-sm leading-6 text-violet-700">
-                You can simulate this subscription
-                payment for demonstration purposes.
-                No real money will be charged.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Main grid */}
-      <div className="grid gap-6 xl:grid-cols-3">
-        {/* Invoice overview */}
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm xl:col-span-2">
-          <div className="border-b border-slate-200 p-6">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
-                <FileText size={20} />
-              </div>
-
-              <div>
-                <h3 className="font-semibold text-slate-950">
-                  Invoice overview
-                </h3>
-
-                <p className="text-sm text-slate-500">
-                  Billing information
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-6 p-6 sm:grid-cols-2">
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Invoice number
-              </p>
-
-              <p className="mt-1 font-semibold text-slate-900">
-                {invoice.invoiceNumber}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Amount
-              </p>
-
-              <p className="mt-1 text-xl font-bold text-slate-950">
-                {formatAmount(
-                  invoice.amount,
-                  invoice.currency
-                )}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Issue date
-              </p>
-
-              <p className="mt-1 text-sm text-slate-700">
-                {formatDateTime(
-                  invoice.issueDate
-                )}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Due date
-              </p>
-
-              <p className="mt-1 text-sm text-slate-700">
-                {formatDateTime(
-                  invoice.dueDate
-                )}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Paid at
-              </p>
-
-              <p className="mt-1 text-sm text-slate-700">
-                {formatDateTime(
-                  invoice.paidAt
-                )}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Currency
-              </p>
-
-              <p className="mt-1 text-sm font-semibold text-slate-700">
-                {invoice.currency}
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* Status management */}
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 p-6">
-            <h3 className="font-semibold text-slate-950">
-              Invoice status
-            </h3>
-
-            <p className="mt-1 text-sm text-slate-500">
-              Update the billing record status.
-            </p>
-          </div>
-
-          <div className="space-y-4 p-6">
-            <select
-              value={selectedStatus}
-              onChange={(event) =>
-                setSelectedStatus(
-                  event.target.value as InvoiceStatus
-                )
-              }
-              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 outline-none focus:border-slate-400 focus:bg-white"
-            >
-              <option value="PENDING">
-                Pending
-              </option>
-
-              <option value="PAID">
-                Paid
-              </option>
-
-              <option value="FAILED">
-                Failed
-              </option>
-
-              <option value="REFUNDED">
-                Refunded
-              </option>
-
-              <option value="CANCELLED">
-                Cancelled
-              </option>
-            </select>
-
-            <button
-              type="button"
-              onClick={updateStatus}
-              disabled={
-                updating ||
-                selectedStatus === invoice.status
-              }
-              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {updating && (
-                <Loader2
-                  size={16}
-                  className="animate-spin"
-                />
-              )}
-
-              {updating
-                ? "Updating..."
-                : "Update status"}
-            </button>
-          </div>
-        </section>
-
-        {/* Restaurant */}
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 p-6">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
-                <Store size={20} />
-              </div>
-
-              <div>
-                <h3 className="font-semibold text-slate-950">
-                  Restaurant
-                </h3>
-
-                <p className="text-sm text-slate-500">
-                  Billing account
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-5 p-6">
-            <div>
-              <p className="text-lg font-semibold text-slate-950">
-                {restaurant?.name ||
-                  "Unknown restaurant"}
-              </p>
-
-              <p className="mt-1 text-sm text-slate-500">
-                {restaurant?.type ||
-                  "Restaurant"}
-              </p>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <MapPin
-                size={17}
-                className="mt-0.5 shrink-0 text-slate-400"
-              />
-
-              <p className="text-sm leading-6 text-slate-600">
-                {restaurant?.address ||
-                  "Address not available"}
-
-                <br />
-
-                {[
-                  restaurant?.city,
-                  restaurant?.state,
-                  restaurant?.pincode,
-                ]
-                  .filter(Boolean)
-                  .join(", ")}
-              </p>
-            </div>
-
-            <div className="flex items-center justify-between border-t border-slate-100 pt-4">
-              <span className="text-sm text-slate-500">
-                Restaurant status
+                {invoice.status}
               </span>
 
-              <span className="text-sm font-semibold text-slate-700">
-                {restaurant?.status || "—"}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-slate-500">
-                Tables
-              </span>
-
-              <span className="text-sm font-semibold text-slate-700">
-                {restaurant?.numberOfTables ??
-                  "—"}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        {/* Subscription */}
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm xl:col-span-2">
-          <div className="border-b border-slate-200 p-6">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
-                <CreditCard size={20} />
-              </div>
-
-              <div>
-                <h3 className="font-semibold text-slate-950">
-                  Subscription
-                </h3>
-
-                <p className="text-sm text-slate-500">
-                  Subscription associated with
-                  this invoice
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-6 p-6 sm:grid-cols-2 lg:grid-cols-3">
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Plan
-              </p>
-
-              <p className="mt-1 font-semibold text-slate-900">
-                {plan?.name || "—"}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Subscription status
-              </p>
-
-              <p className="mt-1 font-semibold text-slate-900">
-                {subscription?.status || "—"}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Billing cycle
-              </p>
-
-              <p className="mt-1 font-semibold text-slate-900">
-                {subscription?.billingCycle ||
-                  "—"}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Subscription price
-              </p>
-
-              <p className="mt-1 font-semibold text-slate-900">
-                {subscription
-                  ? formatAmount(
-                      subscription.price,
-                      invoice.currency
-                    )
-                  : "—"}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Start date
-              </p>
-
-              <p className="mt-1 text-sm text-slate-700">
-                {formatDate(
-                  subscription?.startDate
-                )}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                End date
-              </p>
-
-              <p className="mt-1 text-sm text-slate-700">
-                {formatDate(
-                  subscription?.endDate
-                )}
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* Payment information */}
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm xl:col-span-2">
-          <div className="border-b border-slate-200 p-6">
-            <h3 className="font-semibold text-slate-950">
-              Payment information
-            </h3>
-
-            <p className="mt-1 text-sm text-slate-500">
-              Payment gateway information and
-              transaction details.
-            </p>
-          </div>
-
-          <div className="grid gap-6 p-6 sm:grid-cols-2">
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Payment gateway
-              </p>
-
-              <div className="mt-2">
+              {invoice.paymentGateway && (
                 <span
-                  className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getGatewayClasses(
+                  className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${getGatewayClasses(
                     invoice.paymentGateway
                   )}`}
                 >
-                  {invoice.paymentGateway ||
-                    "Not paid"}
+                  {invoice.paymentGateway}
                 </span>
-              </div>
+              )}
             </div>
 
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Gateway order ID
-              </p>
-
-              <p className="mt-1 break-all text-sm text-slate-700">
-                {invoice.gatewayOrderId ||
-                  "—"}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Gateway payment ID
-              </p>
-
-              <p className="mt-1 break-all text-sm text-slate-700">
-                {invoice.gatewayPaymentId ||
-                  "—"}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Auto renewal
-              </p>
-
-              <p className="mt-1 text-sm font-semibold text-slate-700">
-                {subscription?.autoRenew
-                  ? "Enabled"
-                  : "Disabled"}
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* Notes */}
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 p-6">
-            <h3 className="font-semibold text-slate-950">
-              Notes
-            </h3>
-          </div>
-
-          <div className="p-6">
-            <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">
-              {invoice.notes ||
-                "No notes added."}
+            <p className="mt-2 text-sm text-slate-500">
+              Subscription billing invoice for{" "}
+              <span className="font-semibold text-slate-700">
+                {restaurant?.name ||
+                  "Unknown restaurant"}
+              </span>
             </p>
           </div>
-        </section>
 
-        {/* Record information */}
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm xl:col-span-3">
-          <div className="border-b border-slate-200 p-6">
-            <div className="flex items-center gap-3">
-              <UserRound
-                size={19}
-                className="text-slate-500"
+          <div className="flex flex-wrap items-center gap-3">
+            {invoice.status === "PENDING" && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleRazorpayPayment}
+                  disabled={
+                    razorpayLoading ||
+                    demoPaymentLoading
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {razorpayLoading ? (
+                    <Loader2
+                      size={16}
+                      className="animate-spin"
+                    />
+                  ) : (
+                    <CreditCard size={16} />
+                  )}
+
+                  {razorpayLoading
+                    ? "Processing..."
+                    : "Pay with Razorpay"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDemoPayment}
+                  disabled={
+                    demoPaymentLoading ||
+                    razorpayLoading
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {demoPaymentLoading ? (
+                    <Loader2
+                      size={16}
+                      className="animate-spin"
+                    />
+                  ) : (
+                    <CreditCard size={16} />
+                  )}
+
+                  {demoPaymentLoading
+                    ? "Processing..."
+                    : "Simulate Demo Payment"}
+                </button>
+              </>
+            )}
+
+            <button
+              type="button"
+              onClick={loadInvoice}
+              disabled={
+                loading ||
+                demoPaymentLoading ||
+                razorpayLoading
+              }
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+            >
+              <RefreshCw
+                size={16}
+                className={
+                  loading
+                    ? "animate-spin"
+                    : ""
+                }
+              />
+
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {/* Messages */}
+        {error && (
+          <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <XCircle
+              size={18}
+              className="mt-0.5 shrink-0"
+            />
+
+            <div>{error}</div>
+          </div>
+        )}
+
+        {success && (
+          <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+            <CheckCircle2
+              size={18}
+              className="mt-0.5 shrink-0"
+            />
+
+            <div>{success}</div>
+          </div>
+        )}
+
+        {/* Payment notice */}
+        {invoice.status === "PENDING" && (
+          <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+            <div className="flex items-start gap-3">
+              <CreditCard
+                size={18}
+                className="mt-0.5 shrink-0 text-violet-600"
               />
 
               <div>
-                <h3 className="font-semibold text-slate-950">
-                  Record information
-                </h3>
+                <p className="text-sm font-semibold text-violet-900">
+                  Payment options available
+                </p>
 
-                <p className="text-sm text-slate-500">
-                  Internal invoice record details
+                <p className="mt-1 text-sm leading-6 text-violet-700">
+                  You can pay this invoice using
+                  Razorpay test mode or simulate a
+                  payment using Demo Payment.
+                  No real money will be charged while
+                  using the demo/test environment.
                 </p>
               </div>
             </div>
           </div>
+        )}
 
-          <div className="grid gap-6 p-6 sm:grid-cols-3">
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Invoice ID
-              </p>
+        {/* Main grid */}
+        <div className="grid gap-6 xl:grid-cols-3">
 
-              <p className="mt-1 break-all font-mono text-xs text-slate-600">
-                {invoice._id}
+          {/* Invoice overview */}
+          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm xl:col-span-2">
+            <div className="border-b border-slate-200 p-6">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                  <FileText size={20} />
+                </div>
+
+                <div>
+                  <h3 className="font-semibold text-slate-950">
+                    Invoice overview
+                  </h3>
+
+                  <p className="text-sm text-slate-500">
+                    Billing information
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-6 p-6 sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Invoice number
+                </p>
+
+                <p className="mt-1 font-semibold text-slate-900">
+                  {invoice.invoiceNumber}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Amount
+                </p>
+
+                <p className="mt-1 text-xl font-bold text-slate-950">
+                  {formatAmount(
+                    invoice.amount,
+                    invoice.currency
+                  )}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Issue date
+                </p>
+
+                <p className="mt-1 text-sm text-slate-700">
+                  {formatDateTime(
+                    invoice.issueDate
+                  )}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Due date
+                </p>
+
+                <p className="mt-1 text-sm text-slate-700">
+                  {formatDateTime(
+                    invoice.dueDate
+                  )}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Paid at
+                </p>
+
+                <p className="mt-1 text-sm text-slate-700">
+                  {formatDateTime(
+                    invoice.paidAt
+                  )}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Currency
+                </p>
+
+                <p className="mt-1 text-sm font-semibold text-slate-700">
+                  {invoice.currency}
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* Status management */}
+          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 p-6">
+              <h3 className="font-semibold text-slate-950">
+                Invoice status
+              </h3>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Update the billing record status.
               </p>
             </div>
 
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Created
-              </p>
+            <div className="space-y-4 p-6">
+              <select
+                value={selectedStatus}
+                onChange={(event) =>
+                  setSelectedStatus(
+                    event.target.value as InvoiceStatus
+                  )
+                }
+                className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 outline-none focus:border-slate-400 focus:bg-white"
+              >
+                <option value="PENDING">
+                  Pending
+                </option>
 
-              <p className="mt-1 text-sm text-slate-700">
-                {formatDateTime(
-                  invoice.createdAt
+                <option value="PAID">
+                  Paid
+                </option>
+
+                <option value="FAILED">
+                  Failed
+                </option>
+
+                <option value="REFUNDED">
+                  Refunded
+                </option>
+
+                <option value="CANCELLED">
+                  Cancelled
+                </option>
+              </select>
+
+              <button
+                type="button"
+                onClick={updateStatus}
+                disabled={
+                  updating ||
+                  selectedStatus === invoice.status
+                }
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {updating && (
+                  <Loader2
+                    size={16}
+                    className="animate-spin"
+                  />
                 )}
+
+                {updating
+                  ? "Updating..."
+                  : "Update status"}
+              </button>
+            </div>
+          </section>
+
+          {/* Restaurant */}
+          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 p-6">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                  <Store size={20} />
+                </div>
+
+                <div>
+                  <h3 className="font-semibold text-slate-950">
+                    Restaurant
+                  </h3>
+
+                  <p className="text-sm text-slate-500">
+                    Billing account
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-5 p-6">
+              <div>
+                <p className="text-lg font-semibold text-slate-950">
+                  {restaurant?.name ||
+                    "Unknown restaurant"}
+                </p>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  {restaurant?.type ||
+                    "Restaurant"}
+                </p>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <MapPin
+                  size={17}
+                  className="mt-0.5 shrink-0 text-slate-400"
+                />
+
+                <p className="text-sm leading-6 text-slate-600">
+                  {restaurant?.address ||
+                    "Address not available"}
+
+                  <br />
+
+                  {[
+                    restaurant?.city,
+                    restaurant?.state,
+                    restaurant?.pincode,
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between border-t border-slate-100 pt-4">
+                <span className="text-sm text-slate-500">
+                  Restaurant status
+                </span>
+
+                <span className="text-sm font-semibold text-slate-700">
+                  {restaurant?.status || "—"}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-500">
+                  Tables
+                </span>
+
+                <span className="text-sm font-semibold text-slate-700">
+                  {restaurant?.numberOfTables ??
+                    "—"}
+                </span>
+              </div>
+            </div>
+          </section>
+
+          {/* Subscription */}
+          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm xl:col-span-2">
+            <div className="border-b border-slate-200 p-6">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                  <CreditCard size={20} />
+                </div>
+
+                <div>
+                  <h3 className="font-semibold text-slate-950">
+                    Subscription
+                  </h3>
+
+                  <p className="text-sm text-slate-500">
+                    Subscription associated with
+                    this invoice
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-6 p-6 sm:grid-cols-2 lg:grid-cols-3">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Plan
+                </p>
+
+                <p className="mt-1 font-semibold text-slate-900">
+                  {plan?.name || "—"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Subscription status
+                </p>
+
+                <p className="mt-1 font-semibold text-slate-900">
+                  {subscription?.status || "—"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Billing cycle
+                </p>
+
+                <p className="mt-1 font-semibold text-slate-900">
+                  {subscription?.billingCycle ||
+                    "—"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Subscription price
+                </p>
+
+                <p className="mt-1 font-semibold text-slate-900">
+                  {subscription
+                    ? formatAmount(
+                        subscription.price,
+                        invoice.currency
+                      )
+                    : "—"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Start date
+                </p>
+
+                <p className="mt-1 text-sm text-slate-700">
+                  {formatDate(
+                    subscription?.startDate
+                  )}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  End date
+                </p>
+
+                <p className="mt-1 text-sm text-slate-700">
+                  {formatDate(
+                    subscription?.endDate
+                  )}
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* Payment information */}
+          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm xl:col-span-2">
+            <div className="border-b border-slate-200 p-6">
+              <h3 className="font-semibold text-slate-950">
+                Payment information
+              </h3>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Payment gateway information and
+                transaction details.
               </p>
             </div>
 
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Last updated
-              </p>
+            <div className="grid gap-6 p-6 sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Payment gateway
+                </p>
 
-              <p className="mt-1 text-sm text-slate-700">
-                {formatDateTime(
-                  invoice.updatedAt
-                )}
+                <div className="mt-2">
+                  <span
+                    className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getGatewayClasses(
+                      invoice.paymentGateway
+                    )}`}
+                  >
+                    {invoice.paymentGateway ||
+                      "Not paid"}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Gateway order ID
+                </p>
+
+                <p className="mt-1 break-all text-sm text-slate-700">
+                  {invoice.gatewayOrderId ||
+                    "—"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Gateway payment ID
+                </p>
+
+                <p className="mt-1 break-all text-sm text-slate-700">
+                  {invoice.gatewayPaymentId ||
+                    "—"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Auto renewal
+                </p>
+
+                <p className="mt-1 text-sm font-semibold text-slate-700">
+                  {subscription?.autoRenew
+                    ? "Enabled"
+                    : "Disabled"}
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* Notes */}
+          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 p-6">
+              <h3 className="font-semibold text-slate-950">
+                Notes
+              </h3>
+            </div>
+
+            <div className="p-6">
+              <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                {invoice.notes ||
+                  "No notes added."}
               </p>
             </div>
-          </div>
-        </section>
+          </section>
+
+        </div>
       </div>
-    </div>
+    </>
   );
 }
