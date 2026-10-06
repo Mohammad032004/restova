@@ -135,17 +135,18 @@ export async function POST(
         paidAt: invoice.paidAt,
       },
     });
-  } catch (error) {
-    console.error(
-      "Demo subscription payment error:",
-      error
-    );
+    } catch (error) {
+    console.error("Demo subscription payment error:", error);
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unknown server error.";
 
     return NextResponse.json(
       {
         success: false,
-        message:
-          "Failed to process demo payment.",
+        message: `Demo payment failed: ${message}`,
       },
       { status: 500 }
     );

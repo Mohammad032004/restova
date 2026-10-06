@@ -5,7 +5,16 @@ import { authOptions } from "@/auth";
 import { connectDB } from "@/lib/mongodb";
 import SubscriptionInvoice from "@/models/subscription-invoice";
 
-async function requireSuperAdmin() {
+type AuthResult =
+  | {
+      authorized: true;
+    }
+  | {
+      authorized: false;
+      response: NextResponse;
+    };
+
+async function requireSuperAdmin(): Promise<AuthResult> {
   const session = await getServerSession(authOptions);
 
   if (!session?.user) {
@@ -36,7 +45,6 @@ async function requireSuperAdmin() {
 
   return {
     authorized: true,
-    response: null,
   };
 }
 
@@ -180,7 +188,11 @@ export async function PATCH(
       );
     }
 
-    const allowedGateways = ["RAZORPAY", "OTHER"];
+    const allowedGateways = [
+      "RAZORPAY",
+      "DEMO",
+      "OTHER",
+    ];
 
     if (
       paymentGateway !== undefined &&
@@ -274,7 +286,8 @@ export async function PATCH(
 
     await connectDB();
 
-    const invoice = await SubscriptionInvoice.findById(id);
+    const invoice =
+      await SubscriptionInvoice.findById(id);
 
     if (!invoice) {
       return NextResponse.json(
@@ -300,7 +313,8 @@ export async function PATCH(
     }
 
     if (paymentGateway !== undefined) {
-      invoice.paymentGateway = paymentGateway || undefined;
+      invoice.paymentGateway =
+        paymentGateway || undefined;
     }
 
     if (gatewayOrderId !== undefined) {
@@ -355,16 +369,21 @@ export async function PATCH(
 
     return NextResponse.json({
       success: true,
-      message: "Subscription invoice updated successfully.",
+      message:
+        "Subscription invoice updated successfully.",
       invoice: updatedInvoice,
     });
   } catch (error) {
-    console.error("Update subscription invoice error:", error);
+    console.error(
+      "Update subscription invoice error:",
+      error
+    );
 
     return NextResponse.json(
       {
         success: false,
-        message: "Failed to update subscription invoice.",
+        message:
+          "Failed to update subscription invoice.",
       },
       { status: 500 }
     );
