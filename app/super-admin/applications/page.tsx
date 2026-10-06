@@ -41,6 +41,7 @@ export default function ApplicationsPage() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -52,7 +53,9 @@ export default function ApplicationsPage() {
       setLoading(true);
       setError("");
 
-      const response = await fetch("/api/applications");
+      const response = await fetch("/api/applications", {
+        cache: "no-store",
+      });
 
       const result = await response.json();
 
@@ -71,6 +74,51 @@ export default function ApplicationsPage() {
       );
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function approveApplication(id: string) {
+    const confirmed = window.confirm(
+      "Are you sure you want to approve this application?"
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setApprovingId(id);
+      setError("");
+
+      const response = await fetch(
+        `/api/applications/${id}/approve`,
+        {
+          method: "POST",
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.message || "Failed to approve application."
+        );
+      }
+
+      alert(
+        "Application approved successfully.\n\nRestaurant and owner account have been created."
+      );
+
+      await fetchApplications();
+      router.refresh();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while approving the application."
+      );
+    } finally {
+      setApprovingId(null);
     }
   }
 
@@ -176,14 +224,23 @@ export default function ApplicationsPage() {
           </h1>
 
           <p className="mt-2 text-sm text-slate-500">
-            Review and manage restaurant applications submitted to Restova.
+            Review and manage restaurant applications submitted to
+            Restova.
           </p>
         </div>
 
         {/* Error */}
         {error && (
-          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            {error}
+          <div className="mb-6 flex items-start justify-between gap-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <p>{error}</p>
+
+            <button
+              type="button"
+              onClick={() => setError("")}
+              className="font-semibold text-red-700 hover:text-red-900"
+            >
+              ×
+            </button>
           </div>
         )}
 
@@ -231,7 +288,7 @@ export default function ApplicationsPage() {
 
         {/* Applications */}
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          {/* Header */}
+          {/* Applications header */}
           <div className="border-b border-slate-200 px-6 py-5">
             <h2 className="font-semibold text-slate-950">
               Applications
@@ -269,18 +326,18 @@ export default function ApplicationsPage() {
               </h3>
 
               <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                Restaurant applications submitted through Restova will appear
-                here.
+                Restaurant applications submitted through Restova
+                will appear here.
               </p>
             </div>
           )}
 
-          {/* Application List */}
+          {/* Application list */}
           {!loading && applications.length > 0 && (
             <div className="divide-y divide-slate-100">
               {applications.map((application) => (
                 <div key={application._id} className="p-6">
-                  {/* Main Information */}
+                  {/* Main information */}
                   <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
                     {/* Restaurant */}
                     <div className="flex gap-4">
@@ -396,24 +453,47 @@ export default function ApplicationsPage() {
                     </div>
                   </div>
 
+                  {/* Address */}
+                  <div className="mt-4 rounded-xl border border-slate-100 px-4 py-3">
+                    <p className="text-xs text-slate-400">
+                      Restaurant address
+                    </p>
+
+                    <p className="mt-1 text-sm text-slate-700">
+                      {application.address}, {application.city},{" "}
+                      {application.state} - {application.pincode}
+                    </p>
+                  </div>
+
                   {/* Actions */}
                   {application.status === "PENDING" && (
                     <div className="mt-5 flex flex-wrap gap-3">
                       {/* Approve */}
                       <button
                         type="button"
-                        disabled
-                        title="Approval will be enabled after the restaurant and owner account system is ready."
-                        className="inline-flex cursor-not-allowed items-center gap-2 rounded-xl bg-slate-300 px-4 py-2.5 text-sm font-semibold text-white"
+                        disabled={
+                          approvingId === application._id ||
+                          rejectingId === application._id
+                        }
+                        onClick={() =>
+                          approveApplication(application._id)
+                        }
+                        className="inline-flex items-center gap-2 rounded-xl bg-green-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <CheckCircle2 size={17} />
-                        Approve
+
+                        {approvingId === application._id
+                          ? "Approving..."
+                          : "Approve"}
                       </button>
 
                       {/* Reject */}
                       <button
                         type="button"
-                        disabled={rejectingId === application._id}
+                        disabled={
+                          rejectingId === application._id ||
+                          approvingId === application._id
+                        }
                         onClick={() =>
                           rejectApplication(application._id)
                         }
