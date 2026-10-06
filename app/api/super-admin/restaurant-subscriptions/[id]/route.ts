@@ -22,7 +22,16 @@ const allowedStatuses = [
 type SubscriptionStatus =
   (typeof allowedStatuses)[number];
 
-async function requireSuperAdmin() {
+type AuthResult =
+  | {
+      authorized: true;
+    }
+  | {
+      authorized: false;
+      response: NextResponse;
+    };
+
+async function requireSuperAdmin(): Promise<AuthResult> {
   const session = await getServerSession(authOptions);
 
   if (!session?.user) {
@@ -54,7 +63,6 @@ async function requireSuperAdmin() {
 
   return {
     authorized: true,
-    response: null,
   };
 }
 
@@ -111,8 +119,7 @@ export async function PATCH(
       return NextResponse.json(
         {
           success: false,
-          message:
-            "Invalid subscription status.",
+          message: "Invalid subscription status.",
         },
         { status: 400 }
       );
@@ -125,8 +132,7 @@ export async function PATCH(
       return NextResponse.json(
         {
           success: false,
-          message:
-            "autoRenew must be a boolean.",
+          message: "autoRenew must be a boolean.",
         },
         { status: 400 }
       );
@@ -229,13 +235,10 @@ export async function PATCH(
     );
   }
 }
+
 export async function GET(
   request: Request,
-  context: {
-    params: Promise<{
-      id: string;
-    }>;
-  }
+  context: RouteContext
 ) {
   try {
     const auth = await requireSuperAdmin();
