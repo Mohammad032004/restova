@@ -40,6 +40,8 @@ export default function OwnersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [updatingId, setUpdatingId] =
+    useState<string | null>(null);
 
   useEffect(() => {
     async function loadOwners() {
@@ -65,7 +67,10 @@ export default function OwnersPage() {
 
         setOwners(data.owners);
       } catch (error) {
-        console.error("Owners loading error:", error);
+        console.error(
+          "Owners loading error:",
+          error
+        );
 
         setError(
           error instanceof Error
@@ -83,13 +88,21 @@ export default function OwnersPage() {
   const filteredOwners = useMemo(() => {
     const query = search.toLowerCase().trim();
 
-    if (!query) return owners;
+    if (!query) {
+      return owners;
+    }
 
     return owners.filter((owner) => {
       return (
-        owner.name.toLowerCase().includes(query) ||
-        owner.email.toLowerCase().includes(query) ||
-        owner.phone?.toLowerCase().includes(query) ||
+        owner.name
+          .toLowerCase()
+          .includes(query) ||
+        owner.email
+          .toLowerCase()
+          .includes(query) ||
+        owner.phone
+          ?.toLowerCase()
+          .includes(query) ||
         owner.restaurantId?.name
           ?.toLowerCase()
           .includes(query) ||
@@ -112,9 +125,66 @@ export default function OwnersPage() {
     (owner) => owner.restaurantId
   ).length;
 
+  async function updateOwnerStatus(
+    ownerId: string,
+    isActive: boolean
+  ) {
+    try {
+      setUpdatingId(ownerId);
+      setError("");
+
+      const response = await fetch(
+        `/api/super-admin/owners/${ownerId}/status`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            isActive,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message ||
+            "Failed to update owner status."
+        );
+      }
+
+      setOwners((current) =>
+        current.map((owner) =>
+          owner._id === ownerId
+            ? {
+                ...owner,
+                isActive,
+              }
+            : owner
+        )
+      );
+    } catch (error) {
+      console.error(
+        "Owner status update error:",
+        error
+      );
+
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Failed to update owner status."
+      );
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
   return (
     <div className="px-4 py-8 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
+
         {/* Header */}
         <div className="mb-8">
           <Link
@@ -136,8 +206,8 @@ export default function OwnersPage() {
               </h1>
 
               <p className="mt-2 text-sm text-slate-500">
-                Manage restaurant owner accounts and their
-                connected restaurants.
+                Manage restaurant owner accounts and
+                their connected restaurants.
               </p>
             </div>
 
@@ -149,17 +219,23 @@ export default function OwnersPage() {
 
               <SummaryCard
                 label="Active"
-                value={loading ? "—" : activeOwners}
+                value={
+                  loading ? "—" : activeOwners
+                }
               />
 
               <SummaryCard
                 label="Inactive"
-                value={loading ? "—" : inactiveOwners}
+                value={
+                  loading ? "—" : inactiveOwners
+                }
               />
 
               <SummaryCard
                 label="Connected"
-                value={loading ? "—" : connectedOwners}
+                value={
+                  loading ? "—" : connectedOwners
+                }
               />
             </div>
           </div>
@@ -200,6 +276,8 @@ export default function OwnersPage() {
 
         {/* Owners */}
         <div className="rounded-2xl border border-slate-200 bg-white">
+
+          {/* List Header */}
           <div className="border-b border-slate-200 px-6 py-5">
             <h2 className="font-semibold text-slate-950">
               Owner Accounts
@@ -216,6 +294,7 @@ export default function OwnersPage() {
             </p>
           </div>
 
+          {/* Loading */}
           {loading ? (
             <div className="p-10 text-center">
               <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-900" />
@@ -225,6 +304,8 @@ export default function OwnersPage() {
               </p>
             </div>
           ) : filteredOwners.length === 0 ? (
+
+            /* Empty */
             <div className="p-12 text-center">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
                 <UserRound size={24} />
@@ -240,7 +321,10 @@ export default function OwnersPage() {
                   : "Restaurant owners will appear here after approval."}
               </p>
             </div>
+
           ) : (
+
+            /* Owners */
             <div className="divide-y divide-slate-100">
               {filteredOwners.map((owner) => (
                 <div
@@ -248,7 +332,8 @@ export default function OwnersPage() {
                   className="p-6 transition hover:bg-slate-50/60"
                 >
                   <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
-                    {/* Owner */}
+
+                    {/* Owner Information */}
                     <div className="flex min-w-0 gap-4">
                       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
                         <UserRound size={21} />
@@ -262,7 +347,9 @@ export default function OwnersPage() {
 
                           {owner.isActive ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-700">
-                              <CheckCircle2 size={12} />
+                              <CheckCircle2
+                                size={12}
+                              />
                               Active
                             </span>
                           ) : (
@@ -307,8 +394,8 @@ export default function OwnersPage() {
                               {owner.restaurantId.name}
                             </p>
 
-                            {owner.restaurantId.status ===
-                            "ACTIVE" ? (
+                            {owner.restaurantId
+                              .status === "ACTIVE" ? (
                               <span className="rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700">
                                 Active
                               </span>
@@ -332,7 +419,10 @@ export default function OwnersPage() {
 
                             <span className="inline-flex items-center gap-1.5">
                               <Building2 size={13} />
-                              {owner.restaurantId.numberOfTables}{" "}
+                              {
+                                owner.restaurantId
+                                  .numberOfTables
+                              }{" "}
                               tables
                             </span>
                           </div>
@@ -341,6 +431,47 @@ export default function OwnersPage() {
                         <p className="mt-2 text-sm text-slate-500">
                           No restaurant connected
                         </p>
+                      )}
+                    </div>
+
+                    {/* Account Action */}
+                    <div className="flex shrink-0">
+                      {owner.isActive ? (
+                        <button
+                          type="button"
+                          disabled={
+                            updatingId === owner._id
+                          }
+                          onClick={() =>
+                            updateOwnerStatus(
+                              owner._id,
+                              false
+                            )
+                          }
+                          className="rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {updatingId === owner._id
+                            ? "Updating..."
+                            : "Deactivate"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={
+                            updatingId === owner._id
+                          }
+                          onClick={() =>
+                            updateOwnerStatus(
+                              owner._id,
+                              true
+                            )
+                          }
+                          className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {updatingId === owner._id
+                            ? "Updating..."
+                            : "Activate"}
+                        </button>
                       )}
                     </div>
                   </div>
@@ -363,7 +494,9 @@ function SummaryCard({
 }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-      <p className="text-xs text-slate-500">{label}</p>
+      <p className="text-xs text-slate-500">
+        {label}
+      </p>
 
       <p className="mt-1 text-xl font-bold text-slate-950">
         {value}
