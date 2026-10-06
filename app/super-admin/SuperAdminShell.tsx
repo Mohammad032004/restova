@@ -73,6 +73,10 @@ const navigation: NavigationItem[] = [
         label: "Restaurant Subscriptions",
         href: "/super-admin/subscriptions/restaurant-subscriptions",
       },
+      {
+  label: "Invoices",
+  href: "/super-admin/subscriptions/invoices",
+},
     ],
   },
 
