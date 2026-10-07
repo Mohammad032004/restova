@@ -6,6 +6,8 @@ import { connectDB } from "@/lib/mongodb";
 import Restaurant from "@/models/restaurant";
 import Order, {
   OrderStatus,
+  PaymentMethod,
+  PaymentStatus,
 } from "@/models/order";
 
 const ROLE_PERMISSIONS: Record<string, OrderStatus[]> = {
@@ -27,18 +29,11 @@ const ROLE_PERMISSIONS: Record<string, OrderStatus[]> = {
     "CANCELLED",
   ],
 
-  KITCHEN: [
-    "PREPARING",
-    "READY",
-  ],
+  KITCHEN: ["PREPARING", "READY"],
 
-  WAITER: [
-    "SERVED",
-  ],
+  WAITER: ["SERVED"],
 
-  CASHIER: [
-    "COMPLETED",
-  ],
+  CASHIER: ["COMPLETED"],
 };
 
 const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
@@ -57,6 +52,21 @@ const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   CANCELLED: [],
 };
 
+const PAYMENT_METHODS: PaymentMethod[] = [
+  "CASH",
+  "UPI",
+  "CARD",
+  "RAZORPAY",
+  "OTHER",
+];
+
+const PAYMENT_STATUSES: PaymentStatus[] = [
+  "PENDING",
+  "PAID",
+  "FAILED",
+  "REFUNDED",
+];
+
 interface RouteContext {
   params: Promise<{
     id: string;
@@ -68,6 +78,10 @@ export async function PATCH(
   context: RouteContext
 ) {
   try {
+    // ------------------------------------------------------------
+    // 1. Authentication
+    // ------------------------------------------------------------
+
     const session = await getServerSession(authOptions);
 
     if (!session?.user) {
@@ -80,9 +94,11 @@ export async function PATCH(
       );
     }
 
-    const restaurantId = session.user.restaurantId;
+    // ------------------------------------------------------------
+    // 2. Restaurant authorization
+    // ------------------------------------------------------------
 
-    if (!restaurantId) {
+    if (!session.user.restaurantId) {
       return NextResponse.json(
         {
           success: false,
@@ -92,17 +108,27 @@ export async function PATCH(
       );
     }
 
-    const allowedStatuses = ROLE_PERMISSIONS[session.user.role];
+    // ------------------------------------------------------------
+    // 3. Role authorization
+    // ------------------------------------------------------------
+
+    const allowedStatuses =
+      ROLE_PERMISSIONS[session.user.role];
 
     if (!allowedStatuses) {
       return NextResponse.json(
         {
           success: false,
-          message: "You do not have permission to update orders.",
+          message:
+            "You do not have permission to update restaurant orders.",
         },
         { status: 403 }
       );
     }
+
+    // ------------------------------------------------------------
+    // 4. Get order ID
+    // ------------------------------------------------------------
 
     const { id } = await context.params;
 
@@ -116,23 +142,25 @@ export async function PATCH(
       );
     }
 
+    // ------------------------------------------------------------
+    // 5. Parse request
+    // ------------------------------------------------------------
+
     const body = await request.json();
 
     const requestedStatus = body?.status;
 
-    const validStatuses: OrderStatus[] = [
-      "PLACED",
-      "ACCEPTED",
-      "PREPARING",
-      "READY",
-      "SERVED",
-      "COMPLETED",
-      "CANCELLED",
-    ];
-
     if (
       typeof requestedStatus !== "string" ||
-      !validStatuses.includes(requestedStatus as OrderStatus)
+      ![
+        "PLACED",
+        "ACCEPTED",
+        "PREPARING",
+        "READY",
+        "SERVED",
+        "COMPLETED",
+        "CANCELLED",
+      ].includes(requestedStatus)
     ) {
       return NextResponse.json(
         {
@@ -143,25 +171,121 @@ export async function PATCH(
       );
     }
 
-    const newStatus = requestedStatus as OrderStatus;
+    const nextStatus = requestedStatus as OrderStatus;
 
-    if (!allowedStatuses.includes(newStatus)) {
+    // ------------------------------------------------------------
+    // 6. Payment fields
+    // ------------------------------------------------------------
+
+    let requestedPaymentStatus: PaymentStatus | undefined;
+    let requestedPaymentMethod: PaymentMethod | undefined;
+    let requestedPaymentId: string | undefined;
+
+    if (body.paymentStatus !== undefined) {
+      if (
+        typeof body.paymentStatus !== "string" ||
+        !PAYMENT_STATUSES.includes(
+          body.paymentStatus as PaymentStatus
+        )
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Invalid payment status.",
+          },
+          { status: 400 }
+        );
+      }
+
+      requestedPaymentStatus =
+        body.paymentStatus as PaymentStatus;
+    }
+
+    if (body.paymentMethod !== undefined) {
+      if (
+        typeof body.paymentMethod !== "string" ||
+        !PAYMENT_METHODS.includes(
+          body.paymentMethod as PaymentMethod
+        )
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Invalid payment method.",
+          },
+          { status: 400 }
+        );
+      }
+
+      requestedPaymentMethod =
+        body.paymentMethod as PaymentMethod;
+    }
+
+    if (body.paymentId !== undefined) {
+      if (typeof body.paymentId !== "string") {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Invalid payment ID.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const normalizedPaymentId = body.paymentId.trim();
+
+      if (normalizedPaymentId.length > 200) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Payment ID is too long.",
+          },
+          { status: 400 }
+        );
+      }
+
+      requestedPaymentId =
+        normalizedPaymentId || undefined;
+    }
+
+    // ------------------------------------------------------------
+    // 7. Payment updates are CASHIER-only
+    // ------------------------------------------------------------
+
+    const hasPaymentUpdate =
+      requestedPaymentStatus !== undefined ||
+      requestedPaymentMethod !== undefined ||
+      requestedPaymentId !== undefined;
+
+    if (
+      hasPaymentUpdate &&
+      session.user.role !== "CASHIER"
+    ) {
       return NextResponse.json(
         {
           success: false,
-          message: `Your role cannot change an order to ${newStatus}.`,
+          message:
+            "Only the cashier can update payment information.",
         },
         { status: 403 }
       );
     }
 
+    // ------------------------------------------------------------
+    // 8. Database connection
+    // ------------------------------------------------------------
+
     await connectDB();
 
+    // ------------------------------------------------------------
+    // 9. Verify active restaurant
+    // ------------------------------------------------------------
+
     const restaurant = await Restaurant.findOne({
-      _id: restaurantId,
+      _id: session.user.restaurantId,
       status: "ACTIVE",
     })
-      .select("_id")
+      .select("_id name")
       .lean();
 
     if (!restaurant) {
@@ -173,6 +297,10 @@ export async function PATCH(
         { status: 404 }
       );
     }
+
+    // ------------------------------------------------------------
+    // 10. Find order inside this restaurant
+    // ------------------------------------------------------------
 
     const order = await Order.findOne({
       _id: id,
@@ -189,13 +317,31 @@ export async function PATCH(
       );
     }
 
-    const currentStatus = order.status;
+    // ------------------------------------------------------------
+    // 11. Validate order status permission
+    // ------------------------------------------------------------
 
-    if (currentStatus === newStatus) {
+    if (!allowedStatuses.includes(nextStatus)) {
       return NextResponse.json(
         {
           success: false,
-          message: `Order is already ${newStatus}.`,
+          message: `Your role cannot change an order to ${nextStatus}.`,
+        },
+        { status: 403 }
+      );
+    }
+
+    // ------------------------------------------------------------
+    // 12. Validate order status transition
+    // ------------------------------------------------------------
+
+    const currentStatus = order.status as OrderStatus;
+
+    if (currentStatus === nextStatus) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: `Order is already ${nextStatus}.`,
         },
         { status: 400 }
       );
@@ -204,41 +350,142 @@ export async function PATCH(
     const allowedTransitions =
       VALID_TRANSITIONS[currentStatus] || [];
 
-    if (!allowedTransitions.includes(newStatus)) {
+    if (!allowedTransitions.includes(nextStatus)) {
       return NextResponse.json(
         {
           success: false,
-          message: `Invalid status transition: ${currentStatus} → ${newStatus}.`,
+          message: `Order cannot move from ${currentStatus} to ${nextStatus}.`,
         },
         { status: 400 }
       );
     }
 
-    order.status = newStatus;
+    // ------------------------------------------------------------
+    // 13. CASHIER payment validation
+    // ------------------------------------------------------------
+
+    if (session.user.role === "CASHIER") {
+      // Cashier can only complete a SERVED order.
+
+      if (currentStatus !== "SERVED") {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              "Only served orders can be completed by the cashier.",
+          },
+          { status: 400 }
+        );
+      }
+
+      // Completing an order must include a successful payment.
+
+      if (nextStatus === "COMPLETED") {
+        if (requestedPaymentStatus !== "PAID") {
+          return NextResponse.json(
+            {
+              success: false,
+              message:
+                "A completed order must have a PAID payment status.",
+            },
+            { status: 400 }
+          );
+        }
+
+        if (!requestedPaymentMethod) {
+          return NextResponse.json(
+            {
+              success: false,
+              message:
+                "Payment method is required to complete the order.",
+            },
+            { status: 400 }
+          );
+        }
+
+        // Do not allow a second payment.
+
+        if (order.paymentStatus === "PAID") {
+          return NextResponse.json(
+            {
+              success: false,
+              message: "This order has already been paid.",
+            },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
+    // ------------------------------------------------------------
+    // 14. Prevent payment manipulation on non-completed orders
+    // ------------------------------------------------------------
+
+    if (
+      requestedPaymentStatus === "PAID" &&
+      nextStatus !== "COMPLETED"
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Payment can only be marked PAID when completing the order.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // ------------------------------------------------------------
+    // 15. Apply order status
+    // ------------------------------------------------------------
+
+    order.status = nextStatus;
+
+    // ------------------------------------------------------------
+    // 16. Apply payment information
+    // ------------------------------------------------------------
+
+    if (requestedPaymentStatus !== undefined) {
+      order.paymentStatus = requestedPaymentStatus;
+    }
+
+    if (requestedPaymentMethod !== undefined) {
+      order.paymentMethod = requestedPaymentMethod;
+    }
+
+    if (requestedPaymentId !== undefined) {
+      order.paymentId = requestedPaymentId;
+    }
 
     await order.save();
+
+    // ------------------------------------------------------------
+    // 17. Return updated order
+    // ------------------------------------------------------------
 
     return NextResponse.json(
       {
         success: true,
-        message: `Order #${order.orderNumber} moved from ${currentStatus} to ${newStatus}.`,
+        message: "Order updated successfully.",
+
         order: {
           id: order._id.toString(),
           orderNumber: order.orderNumber,
           status: order.status,
           paymentStatus: order.paymentStatus,
-          updatedAt: order.updatedAt,
+          paymentMethod: order.paymentMethod,
+          paymentId: order.paymentId,
         },
       },
       { status: 200 }
     );
   } catch (error) {
-    console.error("Restaurant order status PATCH error:", error);
+    console.error("Restaurant order PATCH error:", error);
 
     return NextResponse.json(
       {
         success: false,
-        message: "Failed to update order status.",
+        message: "Failed to update order.",
       },
       { status: 500 }
     );
