@@ -81,6 +81,83 @@ function formatDate(dateString: string) {
   });
 }
 
+function getTableLabel(table?: TableInfo) {
+  if (!table) {
+    return "Takeaway";
+  }
+
+  return table.name || `Table ${table.number}`;
+}
+
+function getTableStatusStyle(status: TableStatus) {
+  switch (status) {
+    case "AVAILABLE":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+
+    case "OCCUPIED":
+      return "border-blue-200 bg-blue-50 text-blue-700";
+
+    case "BILL_REQUESTED":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+
+    case "CLEANING":
+      return "border-slate-200 bg-slate-100 text-slate-600";
+
+    default:
+      return "border-slate-200 bg-slate-50 text-slate-600";
+  }
+}
+
+function getTableStatusLabel(status: TableStatus) {
+  switch (status) {
+    case "AVAILABLE":
+      return "Available";
+
+    case "OCCUPIED":
+      return "Occupied";
+
+    case "BILL_REQUESTED":
+      return "Bill Requested";
+
+    case "CLEANING":
+      return "Cleaning";
+
+    default:
+      return status;
+  }
+}
+
+function getNextTableAction(status: TableStatus) {
+  switch (status) {
+    case "AVAILABLE":
+      return {
+        label: "Occupy Table",
+        nextStatus: "OCCUPIED" as TableStatus,
+      };
+
+    case "OCCUPIED":
+      return {
+        label: "Request Bill",
+        nextStatus: "BILL_REQUESTED" as TableStatus,
+      };
+
+    case "BILL_REQUESTED":
+      return {
+        label: "Start Cleaning",
+        nextStatus: "CLEANING" as TableStatus,
+      };
+
+    case "CLEANING":
+      return {
+        label: "Mark Available",
+        nextStatus: "AVAILABLE" as TableStatus,
+      };
+
+    default:
+      return null;
+  }
+}
+
 export default function WaiterPage() {
   const [orders, setOrders] = useState<WaiterOrder[]>([]);
   const [tables, setTables] = useState<TableInfo[]>([]);
@@ -88,9 +165,15 @@ export default function WaiterPage() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+
+  const [updatingOrderId, setUpdatingOrderId] =
+    useState<string | null>(null);
+
+  const [updatingTableId, setUpdatingTableId] =
+    useState<string | null>(null);
 
   const [error, setError] = useState("");
+
   const [selectedOrder, setSelectedOrder] =
     useState<WaiterOrder | null>(null);
 
@@ -112,7 +195,9 @@ export default function WaiterPage() {
       const data: WaiterResponse = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.message || "Failed to load waiter data.");
+        throw new Error(
+          data.message || "Failed to load waiter data."
+        );
       }
 
       setOrders(data.orders || []);
@@ -169,7 +254,9 @@ export default function WaiterPage() {
 
   const billRequestedTables = useMemo(
     () =>
-      tables.filter((table) => table.status === "BILL_REQUESTED"),
+      tables.filter(
+        (table) => table.status === "BILL_REQUESTED"
+      ),
     [tables]
   );
 
@@ -236,49 +323,55 @@ export default function WaiterPage() {
     }
   }
 
-  function getTableLabel(table?: TableInfo) {
-    if (!table) {
-      return "Takeaway";
-    }
+  async function updateTableStatus(
+    tableId: string,
+    nextStatus: TableStatus
+  ) {
+    try {
+      setUpdatingTableId(tableId);
+      setError("");
 
-    return table.name || `Table ${table.number}`;
-  }
+      const response = await fetch(
+        `/api/waiter/tables/${tableId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            status: nextStatus,
+          }),
+        }
+      );
 
-  function getTableStatusStyle(status: TableStatus) {
-    switch (status) {
-      case "AVAILABLE":
-        return "border-emerald-200 bg-emerald-50 text-emerald-700";
+      const data = await response.json();
 
-      case "OCCUPIED":
-        return "border-blue-200 bg-blue-50 text-blue-700";
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Failed to update table."
+        );
+      }
 
-      case "BILL_REQUESTED":
-        return "border-amber-200 bg-amber-50 text-amber-700";
+      setTables((currentTables) =>
+        currentTables.map((table) =>
+          table._id === tableId
+            ? {
+                ...table,
+                status: nextStatus,
+              }
+            : table
+        )
+      );
+    } catch (err) {
+      console.error("Table status update error:", err);
 
-      case "CLEANING":
-        return "border-slate-200 bg-slate-100 text-slate-600";
-
-      default:
-        return "border-slate-200 bg-slate-50 text-slate-600";
-    }
-  }
-
-  function getTableStatusLabel(status: TableStatus) {
-    switch (status) {
-      case "AVAILABLE":
-        return "Available";
-
-      case "OCCUPIED":
-        return "Occupied";
-
-      case "BILL_REQUESTED":
-        return "Bill Requested";
-
-      case "CLEANING":
-        return "Cleaning";
-
-      default:
-        return status;
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to update table."
+      );
+    } finally {
+      setUpdatingTableId(null);
     }
   }
 
@@ -407,6 +500,58 @@ export default function WaiterPage() {
     );
   }
 
+  function renderTableCard(table: TableInfo) {
+    const action = getNextTableAction(table.status);
+    const isUpdating = updatingTableId === table._id;
+
+    return (
+      <div
+        key={table._id}
+        className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-lg font-bold text-slate-950">
+              {table.name || `Table ${table.number}`}
+            </p>
+
+            <p className="mt-1 text-xs text-slate-500">
+              Capacity: {table.capacity}
+            </p>
+          </div>
+
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-xs font-bold text-white">
+            {table.number}
+          </span>
+        </div>
+
+        <div
+          className={`mt-4 rounded-xl border px-3 py-2 text-center text-xs font-bold ${getTableStatusStyle(
+            table.status
+          )}`}
+        >
+          {getTableStatusLabel(table.status)}
+        </div>
+
+        {action && (
+          <button
+            type="button"
+            disabled={isUpdating}
+            onClick={() =>
+              updateTableStatus(
+                table._id,
+                action.nextStatus
+              )
+            }
+            className="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isUpdating ? "Updating..." : action.label}
+          </button>
+        )}
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="min-h-[calc(100vh-64px)] bg-slate-50 px-5 py-8 sm:px-7">
@@ -444,7 +589,7 @@ export default function WaiterPage() {
             </h1>
 
             <p className="mt-2 text-sm text-slate-500">
-              Serve ready orders and monitor restaurant tables.
+              Serve ready orders and manage restaurant table status.
             </p>
           </div>
 
@@ -599,7 +744,7 @@ export default function WaiterPage() {
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              Current table status across the restaurant.
+              Manage the current state of each restaurant table.
             </p>
           </div>
 
@@ -615,36 +760,7 @@ export default function WaiterPage() {
             </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-              {tables.map((table) => (
-                <div
-                  key={table._id}
-                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-lg font-bold text-slate-950">
-                        {table.name || `Table ${table.number}`}
-                      </p>
-
-                      <p className="mt-1 text-xs text-slate-500">
-                        Capacity: {table.capacity}
-                      </p>
-                    </div>
-
-                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-xs font-bold text-white">
-                      {table.number}
-                    </span>
-                  </div>
-
-                  <div
-                    className={`mt-4 rounded-xl border px-3 py-2 text-center text-xs font-bold ${getTableStatusStyle(
-                      table.status
-                    )}`}
-                  >
-                    {getTableStatusLabel(table.status)}
-                  </div>
-                </div>
-              ))}
+              {tables.map(renderTableCard)}
             </div>
           )}
         </section>
@@ -802,6 +918,7 @@ export default function WaiterPage() {
               <div className="mt-5 rounded-xl bg-slate-950 p-4 text-white">
                 <div className="flex justify-between text-sm text-slate-300">
                   <span>Subtotal</span>
+
                   <span>
                     ₹{selectedOrder.subtotal.toFixed(2)}
                   </span>
@@ -809,6 +926,7 @@ export default function WaiterPage() {
 
                 <div className="mt-2 flex justify-between text-sm text-slate-300">
                   <span>Tax</span>
+
                   <span>
                     ₹{selectedOrder.tax.toFixed(2)}
                   </span>
@@ -817,6 +935,7 @@ export default function WaiterPage() {
                 {selectedOrder.discount > 0 && (
                   <div className="mt-2 flex justify-between text-sm text-emerald-300">
                     <span>Discount</span>
+
                     <span>
                       -₹{selectedOrder.discount.toFixed(2)}
                     </span>
@@ -825,6 +944,7 @@ export default function WaiterPage() {
 
                 <div className="mt-3 flex justify-between border-t border-slate-700 pt-3 text-base font-bold">
                   <span>Total</span>
+
                   <span>
                     ₹{selectedOrder.total.toFixed(2)}
                   </span>
