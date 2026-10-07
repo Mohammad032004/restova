@@ -11,6 +11,12 @@ type OrderStatus =
   | "COMPLETED"
   | "CANCELLED";
 
+type PaymentStatus =
+  | "PENDING"
+  | "PAID"
+  | "FAILED"
+  | "REFUNDED";
+
 interface OrderItem {
   name: string;
   quantity: number;
@@ -19,7 +25,7 @@ interface OrderItem {
   notes?: string;
 }
 
-interface TableInfo {
+interface OrderTable {
   _id: string;
   name: string;
   number: number;
@@ -27,416 +33,251 @@ interface TableInfo {
   status: string;
 }
 
-interface KitchenOrder {
+interface RestaurantOrder {
   _id: string;
   orderNumber: number;
-  orderType: string;
-  source: string;
+  orderType: "DINE_IN" | "TAKEAWAY";
+  source: "CUSTOMER_QR" | "WAITER" | "STAFF";
   items: OrderItem[];
   subtotal: number;
   tax: number;
   discount: number;
   total: number;
   status: OrderStatus;
-  paymentStatus: string;
+  paymentStatus: PaymentStatus;
   customerName?: string;
   customerPhone?: string;
   notes?: string;
-  tableId?: TableInfo;
+  tableId?: OrderTable | null;
   createdAt: string;
   updatedAt: string;
 }
 
-interface KitchenResponse {
+interface OrdersResponse {
   success: boolean;
   message?: string;
-  restaurant?: {
-    id: string;
-    name: string;
-  };
-  orders?: KitchenOrder[];
+  orders?: RestaurantOrder[];
 }
 
-const STATUS_CONFIG: Record<
+function formatDate(value: string) {
+  try {
+    return new Intl.DateTimeFormat("en-IN", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatStatus(status: string) {
+  return status
+    .replaceAll("_", " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+const statusStyles: Record<
   "ACCEPTED" | "PREPARING" | "READY",
   {
-    label: string;
-    description: string;
+    badge: string;
+    border: string;
+    background: string;
+    dot: string;
   }
 > = {
   ACCEPTED: {
-    label: "New Orders",
-    description: "Waiting to be prepared",
+    badge: "bg-indigo-100 text-indigo-700",
+    border: "border-indigo-200",
+    background: "bg-indigo-50/40",
+    dot: "bg-indigo-500",
   },
+
   PREPARING: {
-    label: "Preparing",
-    description: "Currently being prepared",
+    badge: "bg-amber-100 text-amber-700",
+    border: "border-amber-200",
+    background: "bg-amber-50/40",
+    dot: "bg-amber-500",
   },
+
   READY: {
-    label: "Ready",
-    description: "Waiting for waiter",
+    badge: "bg-emerald-100 text-emerald-700",
+    border: "border-emerald-200",
+    background: "bg-emerald-50/40",
+    dot: "bg-emerald-500",
   },
 };
 
-function formatTime(dateString: string) {
-  return new Date(dateString).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+export default function KitchenDashboardPage() {
+  const [orders, setOrders] = useState<RestaurantOrder[]>([]);
 
-function formatDate(dateString: string) {
-  return new Date(dateString).toLocaleDateString([], {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function getNextAction(status: OrderStatus) {
-  if (status === "ACCEPTED") {
-    return {
-      label: "Start Preparing",
-      nextStatus: "PREPARING" as const,
-    };
-  }
-
-  if (status === "PREPARING") {
-    return {
-      label: "Mark Ready",
-      nextStatus: "READY" as const,
-    };
-  }
-
-  return null;
-}
-
-export default function KitchenPage() {
-  const [orders, setOrders] = useState<KitchenOrder[]>([]);
-  const [restaurantName, setRestaurantName] = useState("Kitchen");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+
+  const [actionLoading, setActionLoading] =
+    useState<string | null>(null);
+
   const [error, setError] = useState("");
-  const [selectedOrder, setSelectedOrder] = useState<KitchenOrder | null>(
-    null
-  );
+  const [success, setSuccess] = useState("");
 
-  const loadOrders = useCallback(async (showRefresh = false) => {
-    try {
-      setError("");
-
-      if (showRefresh) {
+  const loadOrders = useCallback(
+    async (showRefreshLoader = false) => {
+      if (showRefreshLoader) {
         setRefreshing(true);
       } else {
         setLoading(true);
       }
 
-      const response = await fetch("/api/kitchen/orders", {
-        method: "GET",
-        cache: "no-store",
-      });
+      setError("");
 
-      const data: KitchenResponse = await response.json();
+      try {
+        const response = await fetch(
+          "/api/restaurant/orders",
+          {
+            method: "GET",
+            cache: "no-store",
+          }
+        );
 
-      if (!response.ok || !data.success) {
-        throw new Error(data.message || "Failed to load kitchen orders.");
+        const data: OrdersResponse =
+          await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(
+            data.message ||
+              "Failed to load kitchen orders."
+          );
+        }
+
+        setOrders(data.orders || []);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load kitchen orders."
+        );
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-
-      setOrders(data.orders || []);
-
-      if (data.restaurant?.name) {
-        setRestaurantName(data.restaurant.name);
-      }
-    } catch (err) {
-      console.error("Kitchen orders loading error:", err);
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to load kitchen orders."
-      );
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+    },
+    []
+  );
 
   useEffect(() => {
     loadOrders();
-
-    const interval = window.setInterval(() => {
-      loadOrders(true);
-    }, 15000);
-
-    return () => {
-      window.clearInterval(interval);
-    };
   }, [loadOrders]);
 
-  const counts = useMemo(() => {
-    return {
-      total: orders.length,
-      accepted: orders.filter((order) => order.status === "ACCEPTED").length,
-      preparing: orders.filter(
-        (order) => order.status === "PREPARING"
-      ).length,
-      ready: orders.filter((order) => order.status === "READY").length,
-    };
-  }, [orders]);
-
-  const acceptedOrders = useMemo(
-    () => orders.filter((order) => order.status === "ACCEPTED"),
-    [orders]
-  );
-
-  const preparingOrders = useMemo(
-    () => orders.filter((order) => order.status === "PREPARING"),
-    [orders]
-  );
-
-  const readyOrders = useMemo(
-    () => orders.filter((order) => order.status === "READY"),
-    [orders]
-  );
-
-  async function updateOrderStatus(
+  const updateOrderStatus = async (
     orderId: string,
-    nextStatus: "PREPARING" | "READY"
-  ) {
-    try {
-      setUpdatingOrderId(orderId);
-      setError("");
+    status: "PREPARING" | "READY"
+  ) => {
+    setActionLoading(orderId);
+    setError("");
+    setSuccess("");
 
-      const response = await fetch(`/api/restaurant/orders/${orderId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          status: nextStatus,
-        }),
-      });
+    try {
+      const response = await fetch(
+        `/api/restaurant/orders/${orderId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            status,
+          }),
+        }
+      );
 
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.message || "Failed to update order.");
+        throw new Error(
+          data.message ||
+            "Failed to update order status."
+        );
       }
 
-      setOrders((currentOrders) =>
-        currentOrders.map((order) =>
-          order._id === orderId
-            ? {
-                ...order,
-                status: nextStatus,
-              }
-            : order
-        )
+      setSuccess(
+        data.message ||
+          `Order moved to ${formatStatus(status)}.`
       );
 
-      setSelectedOrder((currentOrder) =>
-        currentOrder && currentOrder._id === orderId
-          ? {
-              ...currentOrder,
-              status: nextStatus,
-            }
-          : currentOrder
-      );
+      await loadOrders();
     } catch (err) {
-      console.error("Kitchen order status update error:", err);
-
       setError(
         err instanceof Error
           ? err.message
           : "Failed to update order."
       );
     } finally {
-      setUpdatingOrderId(null);
+      setActionLoading(null);
     }
-  }
+  };
 
-  function renderOrderCard(order: KitchenOrder) {
-    const action = getNextAction(order.status);
-    const isUpdating = updatingOrderId === order._id;
-
-    return (
-      <div
-        key={order._id}
-        className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
-      >
-        {/* Card Header */}
-        <div className="flex items-start justify-between gap-4 border-b border-slate-100 p-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-lg font-bold text-slate-950">
-                #{order.orderNumber}
-              </span>
-
-              {order.tableId && (
-                <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
-                  {order.tableId.name ||
-                    `Table ${order.tableId.number}`}
-                </span>
-              )}
-            </div>
-
-            <p className="mt-1 text-xs text-slate-500">
-              {formatDate(order.createdAt)} ·{" "}
-              {formatTime(order.createdAt)}
-            </p>
-          </div>
-
-          <span
-            className={`rounded-full px-3 py-1 text-xs font-bold ${
-              order.status === "ACCEPTED"
-                ? "bg-amber-100 text-amber-700"
-                : order.status === "PREPARING"
-                ? "bg-blue-100 text-blue-700"
-                : "bg-emerald-100 text-emerald-700"
-            }`}
-          >
-            {order.status === "ACCEPTED"
-              ? "NEW"
-              : order.status === "PREPARING"
-              ? "PREPARING"
-              : "READY"}
-          </span>
-        </div>
-
-        {/* Customer / Table */}
-        <div className="grid grid-cols-2 gap-3 border-b border-slate-100 px-4 py-3">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Customer
-            </p>
-
-            <p className="mt-1 truncate text-sm font-semibold text-slate-800">
-              {order.customerName || "Walk-in Customer"}
-            </p>
-          </div>
-
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Order Type
-            </p>
-
-            <p className="mt-1 text-sm font-semibold text-slate-800">
-              {order.orderType === "DINE_IN"
-                ? "Dine In"
-                : "Takeaway"}
-            </p>
-          </div>
-        </div>
-
-        {/* Items */}
-        <div className="p-4">
-          <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">
-            Items
-          </p>
-
-          <div className="space-y-3">
-            {order.items.map((item, index) => (
-              <div
-                key={`${item.name}-${index}`}
-                className="rounded-xl bg-slate-50 p-3"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 items-start gap-3">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-950 text-xs font-bold text-white">
-                      {item.quantity}
-                    </span>
-
-                    <div className="min-w-0">
-                      <p className="font-semibold text-slate-900">
-                        {item.name}
-                      </p>
-
-                      {item.notes && (
-                        <p className="mt-1 text-xs text-amber-700">
-                          Note: {item.notes}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <span className="shrink-0 text-sm font-semibold text-slate-700">
-                    ₹{item.total.toFixed(2)}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {order.notes && (
-            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-600">
-                Order Note
-              </p>
-
-              <p className="mt-1 text-sm text-amber-900">
-                {order.notes}
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-4 py-3">
-          <button
-            type="button"
-            onClick={() => setSelectedOrder(order)}
-            className="text-sm font-semibold text-slate-600 transition hover:text-slate-950"
-          >
-            View Details
-          </button>
-
-          {action ? (
-            <button
-              type="button"
-              disabled={isUpdating}
-              onClick={() =>
-                updateOrderStatus(order._id, action.nextStatus)
-              }
-              className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isUpdating ? "Updating..." : action.label}
-            </button>
-          ) : (
-            <span className="rounded-xl bg-emerald-100 px-4 py-2.5 text-sm font-bold text-emerald-700">
-              Ready for Waiter
-            </span>
-          )}
-        </div>
-      </div>
+  const kitchenOrders = useMemo(() => {
+    return orders.filter(
+      (order) =>
+        order.status === "ACCEPTED" ||
+        order.status === "PREPARING" ||
+        order.status === "READY"
     );
-  }
+  }, [orders]);
+
+  const acceptedOrders = useMemo(
+    () =>
+      orders.filter(
+        (order) => order.status === "ACCEPTED"
+      ),
+    [orders]
+  );
+
+  const preparingOrders = useMemo(
+    () =>
+      orders.filter(
+        (order) => order.status === "PREPARING"
+      ),
+    [orders]
+  );
+
+  const readyOrders = useMemo(
+    () =>
+      orders.filter(
+        (order) => order.status === "READY"
+      ),
+    [orders]
+  );
 
   if (loading) {
     return (
-      <div className="min-h-[calc(100vh-64px)] bg-slate-50 px-5 py-8 sm:px-7">
-        <div className="mx-auto max-w-7xl">
-          <div className="animate-pulse">
-            <div className="h-8 w-48 rounded bg-slate-200" />
-            <div className="mt-3 h-4 w-72 rounded bg-slate-200" />
+      <div className="min-h-[calc(100vh-64px)] bg-slate-50">
+        <div className="mx-auto max-w-7xl px-5 py-8 md:px-8">
+          <div className="animate-pulse space-y-6">
+            <div className="h-8 w-64 rounded-lg bg-slate-200" />
 
-            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {[1, 2, 3, 4].map((item) => (
-                <div
-                  key={item}
-                  className="h-28 rounded-2xl bg-white"
-                />
-              ))}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              {Array.from({ length: 3 }).map(
+                (_, index) => (
+                  <div
+                    key={index}
+                    className="h-28 rounded-2xl bg-white"
+                  />
+                )
+              )}
             </div>
 
-            <div className="mt-8 grid gap-5 lg:grid-cols-3">
-              {[1, 2, 3].map((item) => (
-                <div
-                  key={item}
-                  className="h-96 rounded-2xl bg-white"
-                />
-              ))}
-            </div>
+            <div className="h-72 rounded-2xl bg-white" />
           </div>
         </div>
       </div>
@@ -444,21 +285,22 @@ export default function KitchenPage() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-64px)] bg-slate-50 px-5 py-8 sm:px-7">
-      <div className="mx-auto max-w-7xl">
-        {/* Page Header */}
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+    <div className="min-h-[calc(100vh-64px)] bg-slate-50">
+      <div className="mx-auto max-w-7xl px-5 py-8 md:px-8">
+
+        {/* Header */}
+        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
-              {restaurantName}
+            <p className="mb-1 text-sm font-medium text-indigo-600">
+              Kitchen Panel
             </p>
 
-            <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">
-              Kitchen Dashboard
-            </h1>
+            <h2 className="text-2xl font-bold tracking-tight text-slate-900 md:text-3xl">
+              Kitchen Orders
+            </h2>
 
-            <p className="mt-2 text-sm text-slate-500">
-              Manage food preparation and send completed orders to the waiter.
+            <p className="mt-1 text-sm text-slate-500">
+              Prepare orders and mark them ready for the waiter.
             </p>
           </div>
 
@@ -469,372 +311,507 @@ export default function KitchenPage() {
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <svg
-              className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+              className={`h-4 w-4 ${
+                refreshing ? "animate-spin" : ""
+              }`}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
               strokeWidth="2"
             >
               <path
+                d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                d="M4 4v5h5M20 20v-5h-5M5.1 9A7 7 0 0118.9 6.1L20 7M18.9 15A7 7 0 015.1 17.9L4 17"
+              />
+
+              <path
+                d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               />
             </svg>
 
-            {refreshing ? "Refreshing..." : "Refresh"}
+            {refreshing
+              ? "Refreshing..."
+              : "Refresh"}
           </button>
         </div>
 
-        {/* Error */}
+        {/* Messages */}
         {error && (
-          <div className="mt-6 flex items-start justify-between gap-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
-            <div>
-              <p className="text-sm font-bold text-red-800">
-                Something went wrong
-              </p>
-
-              <p className="mt-1 text-sm text-red-700">
-                {error}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setError("")}
-              className="text-sm font-bold text-red-600 hover:text-red-800"
+          <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <svg
+              className="mt-0.5 h-5 w-5 shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
             >
-              ×
-            </button>
+              <circle cx="12" cy="12" r="9" />
+
+              <path
+                d="M12 8v4"
+                strokeLinecap="round"
+              />
+
+              <path
+                d="M12 16h.01"
+                strokeLinecap="round"
+              />
+            </svg>
+
+            <span>{error}</span>
           </div>
         )}
 
-        {/* Stats */}
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Active Orders
+        {success && (
+          <div className="mb-6 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            <svg
+              className="mt-0.5 h-5 w-5 shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <circle cx="12" cy="12" r="9" />
+
+              <path
+                d="m8.5 12 2.2 2.2 4.8-5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+
+            <span>{success}</span>
+          </div>
+        )}
+
+        {/* Summary */}
+        <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
+
+          <div className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="rounded-xl bg-indigo-50 p-2.5">
+                <span className="block h-5 w-5 rounded-full border-4 border-indigo-200 border-t-indigo-600" />
+              </div>
+
+              <span className="text-xs font-medium text-slate-400">
+                Queue
+              </span>
+            </div>
+
+            <p className="text-3xl font-bold text-slate-900">
+              {acceptedOrders.length}
             </p>
 
-            <p className="mt-2 text-3xl font-bold text-slate-950">
-              {counts.total}
+            <p className="mt-1 text-sm text-slate-500">
+              New orders
             </p>
           </div>
 
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-            <p className="text-xs font-bold uppercase tracking-wider text-amber-600">
-              New
+          <div className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="rounded-xl bg-amber-50 p-2.5">
+                <svg
+                  className="h-5 w-5 text-amber-600"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path
+                    d="M4 12h16"
+                    strokeLinecap="round"
+                  />
+
+                  <path
+                    d="M7 7h10M7 17h10"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </div>
+
+              <span className="text-xs font-medium text-slate-400">
+                Kitchen
+              </span>
+            </div>
+
+            <p className="text-3xl font-bold text-slate-900">
+              {preparingOrders.length}
             </p>
 
-            <p className="mt-2 text-3xl font-bold text-amber-900">
-              {counts.accepted}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
-            <p className="text-xs font-bold uppercase tracking-wider text-blue-600">
+            <p className="mt-1 text-sm text-slate-500">
               Preparing
             </p>
-
-            <p className="mt-2 text-3xl font-bold text-blue-900">
-              {counts.preparing}
-            </p>
           </div>
 
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
-            <p className="text-xs font-bold uppercase tracking-wider text-emerald-600">
-              Ready
+          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="rounded-xl bg-emerald-50 p-2.5">
+                <svg
+                  className="h-5 w-5 text-emerald-600"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <circle cx="12" cy="12" r="9" />
+
+                  <path
+                    d="m8.5 12 2.2 2.2 4.8-5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+
+              <span className="text-xs font-medium text-slate-400">
+                Ready
+              </span>
+            </div>
+
+            <p className="text-3xl font-bold text-slate-900">
+              {readyOrders.length}
             </p>
 
-            <p className="mt-2 text-3xl font-bold text-emerald-900">
-              {counts.ready}
+            <p className="mt-1 text-sm text-slate-500">
+              Waiting for waiter
             </p>
           </div>
         </div>
 
-        {/* Empty State */}
-        {orders.length === 0 ? (
-          <div className="mt-8 rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100">
-              <svg
-                className="h-7 w-7 text-slate-400"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M3 12h18M5 12V7a2 2 0 012-2h10a2 2 0 012 2v5M5 12v5a2 2 0 002 2h10a2 2 0 002-2v-5M8 8h8M8 16h5"
-                />
-              </svg>
+        {/* Kitchen Queue */}
+        <section>
+          <div className="mb-5 flex items-end justify-between">
+            <div>
+              <h3 className="text-xl font-bold text-slate-900">
+                Kitchen Queue
+              </h3>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Only accepted, preparing and ready orders are shown.
+              </p>
             </div>
 
-            <h2 className="mt-5 text-lg font-bold text-slate-900">
-              Kitchen is clear
-            </h2>
-
-            <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
-              There are currently no orders waiting for preparation.
-              New accepted orders will appear here automatically.
-            </p>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+              {kitchenOrders.length} orders
+            </span>
           </div>
-        ) : (
-          /* Kitchen Columns */
-          <div className="mt-8 grid gap-5 xl:grid-cols-3">
-            {/* New */}
-            <section>
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-950">
-                    {STATUS_CONFIG.ACCEPTED.label}
-                  </h2>
 
-                  <p className="text-xs text-slate-500">
-                    {STATUS_CONFIG.ACCEPTED.description}
-                  </p>
-                </div>
+          {kitchenOrders.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50">
+                <svg
+                  className="h-7 w-7 text-emerald-600"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <circle cx="12" cy="12" r="9" />
 
-                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-700">
-                  {acceptedOrders.length}
-                </span>
+                  <path
+                    d="m8.5 12 2.2 2.2 4.8-5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
               </div>
 
-              <div className="space-y-4">
-                {acceptedOrders.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-400">
-                    No new orders
-                  </div>
-                ) : (
-                  acceptedOrders.map(renderOrderCard)
-                )}
-              </div>
-            </section>
+              <p className="font-semibold text-slate-700">
+                Kitchen queue is clear
+              </p>
 
-            {/* Preparing */}
-            <section>
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-950">
-                    {STATUS_CONFIG.PREPARING.label}
-                  </h2>
-
-                  <p className="text-xs text-slate-500">
-                    {STATUS_CONFIG.PREPARING.description}
-                  </p>
-                </div>
-
-                <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">
-                  {preparingOrders.length}
-                </span>
-              </div>
-
-              <div className="space-y-4">
-                {preparingOrders.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-400">
-                    Nothing is being prepared
-                  </div>
-                ) : (
-                  preparingOrders.map(renderOrderCard)
-                )}
-              </div>
-            </section>
-
-            {/* Ready */}
-            <section>
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-950">
-                    {STATUS_CONFIG.READY.label}
-                  </h2>
-
-                  <p className="text-xs text-slate-500">
-                    {STATUS_CONFIG.READY.description}
-                  </p>
-                </div>
-
-                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
-                  {readyOrders.length}
-                </span>
-              </div>
-
-              <div className="space-y-4">
-                {readyOrders.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-400">
-                    No ready orders
-                  </div>
-                ) : (
-                  readyOrders.map(renderOrderCard)
-                )}
-              </div>
-            </section>
-          </div>
-        )}
-      </div>
-
-      {/* Order Details Modal */}
-      {selectedOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Order Details
-                </p>
-
-                <h2 className="mt-1 text-xl font-bold text-slate-950">
-                  Order #{selectedOrder.orderNumber}
-                </h2>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setSelectedOrder(null)}
-                className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-xl text-slate-500 transition hover:bg-slate-200 hover:text-slate-900"
-              >
-                ×
-              </button>
+              <p className="mt-1 text-sm text-slate-500">
+                New accepted orders will appear here.
+              </p>
             </div>
+          ) : (
+            <div className="grid gap-5 lg:grid-cols-2">
+              {kitchenOrders.map((order) => {
+                const status =
+                  order.status as
+                    | "ACCEPTED"
+                    | "PREPARING"
+                    | "READY";
 
-            <div className="max-h-[calc(90vh-80px)] overflow-y-auto p-5">
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Customer
-                  </p>
+                const styles =
+                  statusStyles[status];
 
-                  <p className="mt-1 text-sm font-semibold text-slate-900">
-                    {selectedOrder.customerName ||
-                      "Walk-in Customer"}
-                  </p>
-                </div>
+                const isLoading =
+                  actionLoading === order._id;
 
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Table
-                  </p>
-
-                  <p className="mt-1 text-sm font-semibold text-slate-900">
-                    {selectedOrder.tableId?.name ||
-                      (selectedOrder.tableId
-                        ? `Table ${selectedOrder.tableId.number}`
-                        : "Takeaway")}
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Ordered At
-                  </p>
-
-                  <p className="mt-1 text-sm font-semibold text-slate-900">
-                    {formatTime(selectedOrder.createdAt)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-6">
-                <h3 className="text-sm font-bold text-slate-950">
-                  Items
-                </h3>
-
-                <div className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-200">
-                  {selectedOrder.items.map((item, index) => (
-                    <div
-                      key={`${item.name}-${index}`}
-                      className="flex items-start justify-between gap-4 p-4"
-                    >
+                return (
+                  <div
+                    key={order._id}
+                    className={`rounded-2xl border bg-white p-5 shadow-sm transition hover:shadow-md ${styles.border}`}
+                  >
+                    {/* Header */}
+                    <div className="flex items-start justify-between gap-4">
                       <div>
-                        <p className="font-semibold text-slate-900">
-                          {item.name}
-                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`h-2.5 w-2.5 rounded-full ${styles.dot}`}
+                          />
 
-                        <p className="mt-1 text-xs text-slate-500">
-                          Quantity: {item.quantity} × ₹
-                          {item.price.toFixed(2)}
-                        </p>
+                          <h4 className="text-lg font-bold text-slate-900">
+                            Order #{order.orderNumber}
+                          </h4>
 
-                        {item.notes && (
-                          <p className="mt-2 text-xs font-medium text-amber-700">
-                            Note: {item.notes}
-                          </p>
-                        )}
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${styles.badge}`}
+                          >
+                            {formatStatus(
+                              order.status
+                            )}
+                          </span>
+                        </div>
+
+                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
+                          {order.tableId && (
+                            <span>
+                              Table #
+                              {order.tableId.number}
+                            </span>
+                          )}
+
+                          <span>
+                            {order.orderType ===
+                            "DINE_IN"
+                              ? "Dine In"
+                              : "Takeaway"}
+                          </span>
+
+                          <span>
+                            {formatDate(
+                              order.createdAt
+                            )}
+                          </span>
+                        </div>
                       </div>
 
-                      <p className="shrink-0 text-sm font-bold text-slate-900">
-                        ₹{item.total.toFixed(2)}
-                      </p>
+                      <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                        {order.items.length}{" "}
+                        item
+                        {order.items.length ===
+                        1
+                          ? ""
+                          : "s"}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              </div>
 
-              {selectedOrder.notes && (
-                <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
-                  <p className="text-xs font-bold uppercase tracking-wider text-amber-600">
-                    Order Note
-                  </p>
+                    {/* Customer */}
+                    {(order.customerName ||
+                      order.customerPhone) && (
+                      <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          Customer
+                        </p>
 
-                  <p className="mt-1 text-sm text-amber-900">
-                    {selectedOrder.notes}
-                  </p>
-                </div>
-              )}
+                        <div className="mt-1 flex flex-wrap gap-3 text-sm text-slate-700">
+                          {order.customerName && (
+                            <span className="font-semibold">
+                              {
+                                order.customerName
+                              }
+                            </span>
+                          )}
 
-              <div className="mt-5 rounded-xl bg-slate-950 p-4 text-white">
-                <div className="flex justify-between text-sm text-slate-300">
-                  <span>Subtotal</span>
-                  <span>
-                    ₹{selectedOrder.subtotal.toFixed(2)}
-                  </span>
-                </div>
+                          {order.customerPhone && (
+                            <span>
+                              {
+                                order.customerPhone
+                              }
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
-                <div className="mt-2 flex justify-between text-sm text-slate-300">
-                  <span>Tax</span>
-                  <span>₹{selectedOrder.tax.toFixed(2)}</span>
-                </div>
+                    {/* Items */}
+                    <div className="mt-5">
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Order Items
+                      </p>
 
-                {selectedOrder.discount > 0 && (
-                  <div className="mt-2 flex justify-between text-sm text-emerald-300">
-                    <span>Discount</span>
-                    <span>
-                      -₹{selectedOrder.discount.toFixed(2)}
-                    </span>
+                      <div className="space-y-3">
+                        {order.items.map(
+                          (item, index) => (
+                            <div
+                              key={`${order._id}-${index}`}
+                              className="rounded-xl border border-slate-100 bg-slate-50/70 p-3"
+                            >
+                              <div className="flex items-start justify-between gap-4">
+                                <div>
+                                  <p className="font-semibold text-slate-900">
+                                    <span className="mr-2 inline-flex min-w-7 items-center justify-center rounded-md bg-white px-1.5 py-1 text-xs font-bold text-indigo-600 shadow-sm">
+                                      {item.quantity}
+                                    </span>
+
+                                    {
+                                      item.name
+                                    }
+                                  </p>
+
+                                  {item.notes && (
+                                    <div className="mt-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+                                      <p className="text-xs font-semibold text-amber-700">
+                                        Special instruction
+                                      </p>
+
+                                      <p className="mt-0.5 text-xs text-amber-800">
+                                        {
+                                          item.notes
+                                        }
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+
+                                <span className="shrink-0 text-sm font-bold text-slate-700">
+                                  {formatCurrency(
+                                    item.total
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Order Notes */}
+                    {order.notes && (
+                      <div className="mt-4 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">
+                          Order Note
+                        </p>
+
+                        <p className="mt-1 text-sm text-amber-800">
+                          {order.notes}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Total */}
+                    <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
+                      <span className="text-sm text-slate-500">
+                        Order total
+                      </span>
+
+                      <span className="text-lg font-bold text-slate-900">
+                        {formatCurrency(
+                          order.total
+                        )}
+                      </span>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="mt-4">
+                      {order.status ===
+                        "ACCEPTED" && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateOrderStatus(
+                              order._id,
+                              "PREPARING"
+                            )
+                          }
+                          disabled={isLoading}
+                          className="w-full rounded-xl bg-amber-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isLoading
+                            ? "Starting..."
+                            : "Start Preparing"}
+                        </button>
+                      )}
+
+                      {order.status ===
+                        "PREPARING" && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateOrderStatus(
+                              order._id,
+                              "READY"
+                            )
+                          }
+                          disabled={isLoading}
+                          className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isLoading
+                            ? "Updating..."
+                            : "Mark Order Ready"}
+                        </button>
+                      )}
+
+                      {order.status ===
+                        "READY" && (
+                        <div className="rounded-xl bg-emerald-50 px-4 py-3 text-center text-sm font-bold text-emerald-700">
+                          Order ready — waiting for waiter
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
+                );
+              })}
+            </div>
+          )}
+        </section>
 
-                <div className="mt-3 flex justify-between border-t border-slate-700 pt-3 text-base font-bold">
-                  <span>Total</span>
-                  <span>₹{selectedOrder.total.toFixed(2)}</span>
-                </div>
-              </div>
+        {/* Workflow */}
+        <section className="mt-10 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-bold text-slate-900">
+            Kitchen Workflow
+          </h3>
 
-              {getNextAction(selectedOrder.status) && (
-                <button
-                  type="button"
-                  disabled={updatingOrderId === selectedOrder._id}
-                  onClick={() => {
-                    const action = getNextAction(selectedOrder.status);
+          <div className="mt-5 grid gap-4 md:grid-cols-3">
+            <div className="rounded-xl bg-indigo-50 p-4">
+              <span className="text-xs font-bold text-indigo-600">
+                01
+              </span>
 
-                    if (action) {
-                      updateOrderStatus(
-                        selectedOrder._id,
-                        action.nextStatus
-                      );
-                    }
-                  }}
-                  className="mt-5 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {updatingOrderId === selectedOrder._id
-                    ? "Updating..."
-                    : getNextAction(selectedOrder.status)?.label}
-                </button>
-              )}
+              <p className="mt-2 font-semibold text-indigo-900">
+                Accepted
+              </p>
+
+              <p className="mt-1 text-xs leading-5 text-indigo-700">
+                Order has been accepted and is waiting for kitchen preparation.
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-amber-50 p-4">
+              <span className="text-xs font-bold text-amber-600">
+                02
+              </span>
+
+              <p className="mt-2 font-semibold text-amber-900">
+                Preparing
+              </p>
+
+              <p className="mt-1 text-xs leading-5 text-amber-700">
+                Kitchen staff is preparing the food.
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-emerald-50 p-4">
+              <span className="text-xs font-bold text-emerald-600">
+                03
+              </span>
+
+              <p className="mt-2 font-semibold text-emerald-900">
+                Ready
+              </p>
+
+              <p className="mt-1 text-xs leading-5 text-emerald-700">
+                Food is ready and the waiter can serve the customer.
+              </p>
             </div>
           </div>
-        </div>
-      )}
+        </section>
+      </div>
     </div>
   );
 }
