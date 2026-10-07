@@ -28,12 +28,29 @@ export async function sendPasswordSetupEmail({
   const smtpSecure = process.env.SMTP_SECURE === "true";
 
   /*
+   * SMTP CONFIGURATION DIAGNOSTIC
+   *
+   * IMPORTANT:
+   * We only log whether a value exists.
+   * We NEVER log SMTP_PASS or any other secret.
+   */
+  console.log("SMTP configuration check:", {
+    hostConfigured: Boolean(smtpHost),
+    port: smtpPort,
+    secure: smtpSecure,
+    userConfigured: Boolean(smtpUser),
+    passwordConfigured: Boolean(smtpPass),
+    fromConfigured: Boolean(smtpFrom),
+    environment: process.env.NODE_ENV,
+  });
+
+  /*
    * DEVELOPMENT FALLBACK
    *
-   * If SMTP is not configured locally, we don't block the approval flow.
-   * The setup URL will be printed in the terminal.
+   * If SMTP is not configured locally, we allow development
+   * to continue and print the setup URL in the terminal.
    *
-   * In production, missing SMTP configuration is treated as an error.
+   * In production, missing SMTP configuration is an error.
    */
   if (!smtpHost || !smtpUser || !smtpPass || !smtpFrom) {
     if (process.env.NODE_ENV !== "production") {
@@ -56,6 +73,9 @@ export async function sendPasswordSetupEmail({
     );
   }
 
+  /*
+   * CREATE SMTP TRANSPORTER
+   */
   const transporter = nodemailer.createTransport({
     host: smtpHost,
     port: smtpPort,
@@ -66,9 +86,22 @@ export async function sendPasswordSetupEmail({
     },
   });
 
+  /*
+   * VERIFY SMTP CONNECTION
+   *
+   * This tells us whether Vercel can actually connect
+   * to Gmail and authenticate using the configured account.
+   */
+  await transporter.verify();
+
+  console.log("SMTP connection verified successfully.");
+
   const safeOwnerName = escapeHtml(ownerName);
   const safeSetupUrl = escapeHtml(setupUrl);
 
+  /*
+   * PLAIN TEXT EMAIL
+   */
   const text = `
 Hello ${ownerName},
 
@@ -86,12 +119,18 @@ Regards,
 Restova Team
 `.trim();
 
+  /*
+   * HTML EMAIL
+   */
   const html = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
   <title>Set up your Restova account</title>
 </head>
 
@@ -183,13 +222,18 @@ Restova Team
             line-height: 1.7;
           "
         >
-          Your restaurant owner account has been created successfully.
-          To access your Restova dashboard, you first need to create
-          your account password.
+          Your restaurant owner account has been created
+          successfully. To access your Restova dashboard,
+          you first need to create your account password.
         </p>
 
         <!-- Button -->
-        <div style="text-align: center; margin: 32px 0;">
+        <div
+          style="
+            text-align: center;
+            margin: 32px 0;
+          "
+        >
           <a
             href="${safeSetupUrl}"
             style="
@@ -227,8 +271,8 @@ Restova Team
             line-height: 1.6;
           "
         >
-          If the button above does not work, copy and paste the following
-          link into your browser:
+          If the button above does not work, copy and paste
+          the following link into your browser:
         </p>
 
         <div
@@ -252,8 +296,8 @@ Restova Team
             line-height: 1.6;
           "
         >
-          If you did not request this account, you can safely ignore
-          this email.
+          If you did not request this account, you can safely
+          ignore this email.
         </p>
 
       </div>
@@ -274,7 +318,8 @@ Restova Team
             font-size: 12px;
           "
         >
-          © ${new Date().getFullYear()} Restova. All rights reserved.
+          © ${new Date().getFullYear()} Restova.
+          All rights reserved.
         </p>
       </div>
 
@@ -284,6 +329,9 @@ Restova Team
 </html>
 `.trim();
 
+  /*
+   * SEND EMAIL
+   */
   await transporter.sendMail({
     from: smtpFrom,
     to: ownerEmail,
@@ -291,9 +339,13 @@ Restova Team
     text,
     html,
     ...(process.env.SMTP_REPLY_TO
-      ? { replyTo: process.env.SMTP_REPLY_TO }
+      ? {
+          replyTo: process.env.SMTP_REPLY_TO,
+        }
       : {}),
   });
+
+  console.log("Password setup email sent successfully.");
 
   return {
     success: true,
