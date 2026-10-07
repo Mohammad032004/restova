@@ -1,56 +1,48 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import crypto from "crypto";
 
 import { authOptions } from "@/auth";
 import { connectDB } from "@/lib/mongodb";
+
 import Restaurant from "@/models/restaurant";
-import Table, { TableStatus } from "@/models/table";
-import Order from "@/models/order";
+import Table from "@/models/table";
 
-const ROLE_PERMISSIONS: Record<string, TableStatus[]> = {
-  RESTAURANT_OWNER: [
-    "BILL_REQUESTED",
-    "CLEANING",
-    "AVAILABLE",
-  ],
-  MANAGER: [
-    "BILL_REQUESTED",
-    "CLEANING",
-    "AVAILABLE",
-  ],
-  WAITER: [
-    "BILL_REQUESTED",
-    "CLEANING",
-    "AVAILABLE",
-  ],
-};
+/* ============================================================
+   VIEW PERMISSIONS
 
-const VALID_TRANSITIONS: Record<
-  TableStatus,
-  TableStatus[]
-> = {
-  AVAILABLE: ["OCCUPIED"],
-  OCCUPIED: ["BILL_REQUESTED"],
-  BILL_REQUESTED: ["CLEANING"],
-  CLEANING: ["AVAILABLE"],
-};
+   These roles can view restaurant tables.
+============================================================ */
 
-interface RouteContext {
-  params: Promise<{
-    id: string;
-  }>;
-}
+const VIEW_ROLES = [
+  "RESTAURANT_OWNER",
+  "MANAGER",
+  "WAITER",
+];
 
-export async function PATCH(
-  request: Request,
-  context: RouteContext
-) {
+/* ============================================================
+   MANAGEMENT PERMISSIONS
+
+   Only Owner / Manager can create tables.
+============================================================ */
+
+const MANAGE_ROLES = [
+  "RESTAURANT_OWNER",
+  "MANAGER",
+];
+
+/* ============================================================
+   GET TABLES
+============================================================ */
+
+export async function GET() {
   try {
-    // ------------------------------------------------------------
-    // 1. Authentication
-    // ------------------------------------------------------------
+    /* ========================================================
+       AUTHENTICATION
+    ======================================================== */
 
-    const session = await getServerSession(authOptions);
+    const session =
+      await getServerSession(authOptions);
 
     if (!session?.user) {
       return NextResponse.json(
@@ -58,65 +50,211 @@ export async function PATCH(
           success: false,
           message: "Unauthorized.",
         },
-        { status: 401 }
+        {
+          status: 401,
+        }
       );
     }
 
-    // ------------------------------------------------------------
-    // 2. Restaurant association
-    // ------------------------------------------------------------
+    /* ========================================================
+       ROLE CHECK
+    ======================================================== */
+
+    if (
+      !VIEW_ROLES.includes(
+        session.user.role
+      )
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "You do not have permission to view restaurant tables.",
+        },
+        {
+          status: 403,
+        }
+      );
+    }
+
+    /* ========================================================
+       RESTAURANT CHECK
+    ======================================================== */
 
     if (!session.user.restaurantId) {
       return NextResponse.json(
         {
           success: false,
           message:
-            "Your account is not associated with a restaurant.",
+            "Restaurant information is missing.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    // ------------------------------------------------------------
-    // 3. Role authorization
-    // ------------------------------------------------------------
+    /* ========================================================
+       DATABASE
+    ======================================================== */
 
-    const allowedStatuses =
-      ROLE_PERMISSIONS[session.user.role];
+    await connectDB();
 
-    if (!allowedStatuses) {
+    /* ========================================================
+       VERIFY ACTIVE RESTAURANT
+    ======================================================== */
+
+    const restaurant =
+      await Restaurant.findOne({
+        _id: session.user.restaurantId,
+        status: "ACTIVE",
+      })
+        .select(
+          "_id name numberOfTables status"
+        )
+        .lean();
+
+    if (!restaurant) {
       return NextResponse.json(
         {
           success: false,
           message:
-            "You do not have permission to manage tables.",
+            "Restaurant not found or inactive.",
         },
-        { status: 403 }
+        {
+          status: 404,
+        }
       );
     }
 
-    // ------------------------------------------------------------
-    // 4. Get table ID
-    // ------------------------------------------------------------
+    /* ========================================================
+       GET TABLES
 
-    const { id } = await context.params;
+       Always scoped to the authenticated restaurant.
+    ======================================================== */
 
-    if (!id) {
+    const tables =
+      await Table.find({
+        restaurantId: restaurant._id,
+      })
+        .sort({
+          number: 1,
+        })
+        .lean();
+
+    /* ========================================================
+       RESPONSE
+    ======================================================== */
+
+    return NextResponse.json(
+      {
+        success: true,
+
+        restaurant: {
+          id: restaurant._id.toString(),
+          name: restaurant.name,
+          numberOfTables:
+            restaurant.numberOfTables,
+        },
+
+        tables,
+      },
+      {
+        status: 200,
+      }
+    );
+  } catch (error) {
+    console.error(
+      "Restaurant tables GET error:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        success: false,
+        message:
+          "Failed to load restaurant tables.",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+}
+
+/* ============================================================
+   CREATE TABLE
+============================================================ */
+
+export async function POST(
+  request: Request
+) {
+  try {
+    /* ========================================================
+       AUTHENTICATION
+    ======================================================== */
+
+    const session =
+      await getServerSession(authOptions);
+
+    if (!session?.user) {
       return NextResponse.json(
         {
           success: false,
-          message: "Table ID is required.",
+          message: "Unauthorized.",
         },
-        { status: 400 }
+        {
+          status: 401,
+        }
       );
     }
 
-    // ------------------------------------------------------------
-    // 5. Parse request
-    // ------------------------------------------------------------
+    /* ========================================================
+       MANAGEMENT ROLE CHECK
+    ======================================================== */
+
+    if (
+      !MANAGE_ROLES.includes(
+        session.user.role
+      )
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Only the restaurant owner or manager can create tables.",
+        },
+        {
+          status: 403,
+        }
+      );
+    }
+
+    /* ========================================================
+       RESTAURANT CHECK
+    ======================================================== */
+
+    if (!session.user.restaurantId) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Restaurant information is missing.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /* ========================================================
+       REQUEST BODY
+    ======================================================== */
 
     let body: {
-      status?: unknown;
+      name?: unknown;
+      number?: unknown;
+      capacity?: unknown;
     };
 
     try {
@@ -127,64 +265,94 @@ export async function PATCH(
           success: false,
           message: "Invalid request body.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    const requestedStatus = body?.status;
+    const name =
+      typeof body.name === "string"
+        ? body.name.trim()
+        : "";
 
-    const validStatuses: TableStatus[] = [
-      "AVAILABLE",
-      "OCCUPIED",
-      "BILL_REQUESTED",
-      "CLEANING",
-    ];
+    const number =
+      typeof body.number === "number"
+        ? body.number
+        : Number(body.number);
+
+    const capacity =
+      typeof body.capacity === "number"
+        ? body.capacity
+        : Number(body.capacity);
+
+    /* ========================================================
+       INPUT VALIDATION
+    ======================================================== */
+
+    if (!name) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Table name is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
 
     if (
-      typeof requestedStatus !== "string" ||
-      !validStatuses.includes(
-        requestedStatus as TableStatus
-      )
+      !Number.isInteger(number) ||
+      number < 1
     ) {
       return NextResponse.json(
         {
           success: false,
-          message: "Invalid table status.",
+          message:
+            "Table number must be a positive integer.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    const nextStatus =
-      requestedStatus as TableStatus;
-
-    if (!allowedStatuses.includes(nextStatus)) {
+    if (
+      !Number.isInteger(capacity) ||
+      capacity < 1
+    ) {
       return NextResponse.json(
         {
           success: false,
           message:
-            `Your role cannot change a table to ${nextStatus}.`,
+            "Table capacity must be a positive integer.",
         },
-        { status: 403 }
+        {
+          status: 400,
+        }
       );
     }
 
-    // ------------------------------------------------------------
-    // 6. Database connection
-    // ------------------------------------------------------------
+    /* ========================================================
+       DATABASE
+    ======================================================== */
 
     await connectDB();
 
-    // ------------------------------------------------------------
-    // 7. Verify active restaurant
-    // ------------------------------------------------------------
+    /* ========================================================
+       VERIFY ACTIVE RESTAURANT
+    ======================================================== */
 
-    const restaurant = await Restaurant.findOne({
-      _id: session.user.restaurantId,
-      status: "ACTIVE",
-    })
-      .select("_id name")
-      .lean();
+    const restaurant =
+      await Restaurant.findOne({
+        _id: session.user.restaurantId,
+        status: "ACTIVE",
+      })
+        .select(
+          "_id name numberOfTables status"
+        )
+        .lean();
 
     if (!restaurant) {
       return NextResponse.json(
@@ -193,201 +361,119 @@ export async function PATCH(
           message:
             "Restaurant not found or inactive.",
         },
-        { status: 404 }
-      );
-    }
-
-    // ------------------------------------------------------------
-    // 8. Find table inside this restaurant
-    // ------------------------------------------------------------
-
-    const table = await Table.findOne({
-      _id: id,
-      restaurantId: restaurant._id,
-    });
-
-    if (!table) {
-      return NextResponse.json(
         {
-          success: false,
-          message: "Table not found.",
-        },
-        { status: 404 }
+          status: 404,
+        }
       );
     }
 
-    // ------------------------------------------------------------
-    // 9. Validate current → next transition
-    // ------------------------------------------------------------
+    /* ========================================================
+       CHECK TABLE LIMIT
 
-    const currentStatus =
-      table.status as TableStatus;
+       Restaurant can only create the number of tables
+       included in its registered configuration.
+    ======================================================== */
 
-    if (currentStatus === nextStatus) {
+    const existingTableCount =
+      await Table.countDocuments({
+        restaurantId: restaurant._id,
+      });
+
+    if (
+      existingTableCount >=
+      restaurant.numberOfTables
+    ) {
       return NextResponse.json(
         {
           success: false,
           message:
-            `Table is already ${nextStatus}.`,
+            `You have reached your restaurant's maximum of ${restaurant.numberOfTables} tables.`,
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    const allowedTransitions =
-      VALID_TRANSITIONS[currentStatus] || [];
+    /* ========================================================
+       DUPLICATE TABLE NUMBER CHECK
+    ======================================================== */
 
-    if (!allowedTransitions.includes(nextStatus)) {
+    const existingTable =
+      await Table.findOne({
+        restaurantId: restaurant._id,
+        number,
+      })
+        .select("_id")
+        .lean();
+
+    if (existingTable) {
       return NextResponse.json(
         {
           success: false,
           message:
-            `Table cannot move from ${currentStatus} to ${nextStatus}.`,
+            `Table number ${number} already exists.`,
         },
-        { status: 400 }
+        {
+          status: 409,
+        }
       );
     }
 
-    // ------------------------------------------------------------
-    // 10. BILL_REQUESTED validation
-    // ------------------------------------------------------------
+    /* ========================================================
+       GENERATE QR TOKEN
+    ======================================================== */
 
-    if (nextStatus === "BILL_REQUESTED") {
-      const activeOrder = await Order.findOne({
-        restaurantId: restaurant._id,
-        tableId: table._id,
-        status: {
-          $nin: ["COMPLETED", "CANCELLED"],
-        },
-      })
-        .select("_id orderNumber status paymentStatus")
-        .lean();
+    const qrToken =
+      crypto.randomBytes(32).toString("hex");
 
-      if (!activeOrder) {
-        return NextResponse.json(
-          {
-            success: false,
-            message:
-              "This table has no active order to bill.",
-          },
-          { status: 400 }
-        );
-      }
-    }
+    /* ========================================================
+       CREATE TABLE
+    ======================================================== */
 
-    // ------------------------------------------------------------
-    // 11. CLEANING validation
-    // ------------------------------------------------------------
+    const table =
+      await Table.create({
+        restaurantId:
+          restaurant._id,
 
-    if (nextStatus === "CLEANING") {
-      const incompleteOrder = await Order.findOne({
-        restaurantId: restaurant._id,
-        tableId: table._id,
-        status: {
-          $nin: ["COMPLETED", "CANCELLED"],
-        },
-      })
-        .select(
-          "_id orderNumber status paymentStatus"
-        )
-        .lean();
+        name,
 
-      if (incompleteOrder) {
-        return NextResponse.json(
-          {
-            success: false,
-            message:
-              `Order #${incompleteOrder.orderNumber} is still ${incompleteOrder.status}. Complete the order before cleaning the table.`,
-          },
-          { status: 400 }
-        );
-      }
-    }
+        number,
 
-    // ------------------------------------------------------------
-    // 12. AVAILABLE validation
-    // ------------------------------------------------------------
+        capacity,
 
-    if (nextStatus === "AVAILABLE") {
-      const incompleteOrder = await Order.findOne({
-        restaurantId: restaurant._id,
-        tableId: table._id,
-        status: {
-          $nin: ["COMPLETED", "CANCELLED"],
-        },
-      })
-        .select(
-          "_id orderNumber status paymentStatus"
-        )
-        .lean();
+        status: "AVAILABLE",
 
-      if (incompleteOrder) {
-        return NextResponse.json(
-          {
-            success: false,
-            message:
-              `Table cannot be released. Order #${incompleteOrder.orderNumber} is still ${incompleteOrder.status}.`,
-          },
-          { status: 400 }
-        );
-      }
+        qrToken,
+      });
 
-      const unpaidCompletedOrder =
-        await Order.findOne({
-          restaurantId: restaurant._id,
-          tableId: table._id,
-          status: "COMPLETED",
-          paymentStatus: {
-            $ne: "PAID",
-          },
-        })
-          .select(
-            "_id orderNumber status paymentStatus"
-          )
-          .lean();
-
-      if (unpaidCompletedOrder) {
-        return NextResponse.json(
-          {
-            success: false,
-            message:
-              `Table cannot be released because order #${unpaidCompletedOrder.orderNumber} has not been paid.`,
-          },
-          { status: 400 }
-        );
-      }
-    }
-
-    // ------------------------------------------------------------
-    // 13. Apply table status
-    // ------------------------------------------------------------
-
-    table.status = nextStatus;
-
-    await table.save();
-
-    // ------------------------------------------------------------
-    // 14. Return updated table
-    // ------------------------------------------------------------
+    /* ========================================================
+       RESPONSE
+    ======================================================== */
 
     return NextResponse.json(
       {
         success: true,
+
         message:
-          `Table status changed from ${currentStatus} to ${nextStatus}.`,
+          "Table created successfully.",
+
         table: {
           id: table._id.toString(),
           name: table.name,
           number: table.number,
           capacity: table.capacity,
           status: table.status,
+          qrToken: table.qrToken,
         },
       },
-      { status: 200 }
+      {
+        status: 201,
+      }
     );
   } catch (error) {
     console.error(
-      "Restaurant table PATCH error:",
+      "Restaurant table POST error:",
       error
     );
 
@@ -395,9 +481,11 @@ export async function PATCH(
       {
         success: false,
         message:
-          "Failed to update table status.",
+          "Failed to create table.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
