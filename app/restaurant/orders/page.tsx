@@ -147,11 +147,15 @@ export default function OrdersPage() {
 
   const [filter, setFilter] = useState<Filter>("ALL");
 
-  const [actionLoading, setActionLoading] = useState<string | null>(
-    null
-  );
+  const [actionLoading, setActionLoading] =
+    useState<string | null>(null);
 
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  /* =====================================================
+     LOAD ORDERS
+  ===================================================== */
 
   const loadOrders = async (showLoader = true) => {
     try {
@@ -163,23 +167,33 @@ export default function OrdersPage() {
 
       setError("");
 
-      const response = await fetch("/api/restaurant/orders", {
-        method: "GET",
-        cache: "no-store",
-      });
+      const response = await fetch(
+        "/api/restaurant/orders",
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
 
-      const data: ApiResponse = await response.json();
+      const data: ApiResponse =
+        await response.json();
 
       if (!response.ok || !data.success) {
         throw new Error(
-          data.message || "Failed to load restaurant orders."
+          data.message ||
+            "Failed to load restaurant orders."
         );
       }
 
       setOrders(data.orders || []);
-      setRestaurantName(data.restaurant?.name || "");
+      setRestaurantName(
+        data.restaurant?.name || ""
+      );
     } catch (err) {
-      console.error("Load orders error:", err);
+      console.error(
+        "Load orders error:",
+        err
+      );
 
       setError(
         err instanceof Error
@@ -196,13 +210,26 @@ export default function OrdersPage() {
     loadOrders();
   }, []);
 
+  /* =====================================================
+     UPDATE ORDER
+     
+     IMPORTANT:
+     Restaurant owner / manager page only performs:
+     
+     PLACED -> ACCEPTED
+     PLACED -> CANCELLED
+     
+     Other roles handle the rest.
+  ===================================================== */
+
   const updateOrderStatus = async (
     orderId: string,
-    status: OrderStatus
+    status: "ACCEPTED" | "CANCELLED"
   ) => {
     try {
       setActionLoading(orderId);
       setError("");
+      setSuccess("");
 
       const response = await fetch(
         `/api/restaurant/orders/${orderId}`,
@@ -221,7 +248,8 @@ export default function OrdersPage() {
 
       if (!response.ok || !data.success) {
         throw new Error(
-          data.message || "Failed to update order."
+          data.message ||
+            "Failed to update order."
         );
       }
 
@@ -232,24 +260,36 @@ export default function OrdersPage() {
                 ...order,
                 status: data.order.status,
                 updatedAt:
-                  data.order.updatedAt || order.updatedAt,
+                  data.order.updatedAt ||
+                  order.updatedAt,
               }
             : order
         )
       );
 
       setSelectedOrder((currentOrder) =>
-        currentOrder && currentOrder._id === orderId
+        currentOrder &&
+        currentOrder._id === orderId
           ? {
               ...currentOrder,
               status: data.order.status,
               updatedAt:
-                data.order.updatedAt || currentOrder.updatedAt,
+                data.order.updatedAt ||
+                currentOrder.updatedAt,
             }
           : currentOrder
       );
+
+      setSuccess(
+        status === "ACCEPTED"
+          ? "Order accepted successfully."
+          : "Order cancelled successfully."
+      );
     } catch (err) {
-      console.error("Update order status error:", err);
+      console.error(
+        "Update order status error:",
+        err
+      );
 
       setError(
         err instanceof Error
@@ -261,13 +301,20 @@ export default function OrdersPage() {
     }
   };
 
+  /* =====================================================
+     FILTERS
+  ===================================================== */
+
   const filteredOrders = useMemo(() => {
     if (filter === "ALL") {
       return orders;
     }
 
     if (filter === "PLACED") {
-      return orders.filter((order) => order.status === "PLACED");
+      return orders.filter(
+        (order) =>
+          order.status === "PLACED"
+      );
     }
 
     if (filter === "PREPARING") {
@@ -279,7 +326,10 @@ export default function OrdersPage() {
     }
 
     if (filter === "READY") {
-      return orders.filter((order) => order.status === "READY");
+      return orders.filter(
+        (order) =>
+          order.status === "READY"
+      );
     }
 
     if (filter === "COMPLETED") {
@@ -293,12 +343,17 @@ export default function OrdersPage() {
     return orders;
   }, [orders, filter]);
 
+  /* =====================================================
+     STATS
+  ===================================================== */
+
   const stats = useMemo(() => {
     return {
       all: orders.length,
 
       newOrders: orders.filter(
-        (order) => order.status === "PLACED"
+        (order) =>
+          order.status === "PLACED"
       ).length,
 
       preparing: orders.filter(
@@ -308,7 +363,8 @@ export default function OrdersPage() {
       ).length,
 
       ready: orders.filter(
-        (order) => order.status === "READY"
+        (order) =>
+          order.status === "READY"
       ).length,
 
       completed: orders.filter(
@@ -319,19 +375,29 @@ export default function OrdersPage() {
     };
   }, [orders]);
 
+  /* =====================================================
+     HELPERS
+  ===================================================== */
+
   const formatTime = (date: string) => {
-    return new Date(date).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    return new Date(date).toLocaleTimeString(
+      [],
+      {
+        hour: "2-digit",
+        minute: "2-digit",
+      }
+    );
   };
 
   const formatDate = (date: string) => {
-    return new Date(date).toLocaleDateString([], {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
+    return new Date(date).toLocaleDateString(
+      [],
+      {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }
+    );
   };
 
   const formatCurrency = (value: number) => {
@@ -341,7 +407,9 @@ export default function OrdersPage() {
     })}`;
   };
 
-  const getTableName = (tableId?: Table | string) => {
+  const getTableName = (
+    tableId?: Table | string
+  ) => {
     if (!tableId) {
       return "Takeaway";
     }
@@ -350,10 +418,15 @@ export default function OrdersPage() {
       return "Table";
     }
 
-    return tableId.name || `Table ${tableId.number}`;
+    return (
+      tableId.name ||
+      `Table ${tableId.number}`
+    );
   };
 
-  const getSourceLabel = (source: Order["source"]) => {
+  const getSourceLabel = (
+    source: Order["source"]
+  ) => {
     switch (source) {
       case "CUSTOMER_QR":
         return "QR Order";
@@ -369,8 +442,15 @@ export default function OrdersPage() {
     }
   };
 
-  const getOrderActions = (order: Order) => {
-    const isLoading = actionLoading === order._id;
+  /* =====================================================
+     OWNER / MANAGER ACTIONS
+  ===================================================== */
+
+  const getOrderActions = (
+    order: Order
+  ) => {
+    const isLoading =
+      actionLoading === order._id;
 
     switch (order.status) {
       case "PLACED":
@@ -379,18 +459,26 @@ export default function OrdersPage() {
             <button
               type="button"
               onClick={() =>
-                updateOrderStatus(order._id, "ACCEPTED")
+                updateOrderStatus(
+                  order._id,
+                  "ACCEPTED"
+                )
               }
               disabled={isLoading}
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isLoading ? "Updating..." : "Accept Order"}
+              {isLoading
+                ? "Updating..."
+                : "Accept Order"}
             </button>
 
             <button
               type="button"
               onClick={() =>
-                updateOrderStatus(order._id, "CANCELLED")
+                updateOrderStatus(
+                  order._id,
+                  "CANCELLED"
+                )
               }
               disabled={isLoading}
               className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
@@ -402,71 +490,30 @@ export default function OrdersPage() {
 
       case "ACCEPTED":
         return (
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                updateOrderStatus(order._id, "PREPARING")
-              }
-              disabled={isLoading}
-              className="rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isLoading ? "Updating..." : "Start Preparing"}
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                updateOrderStatus(order._id, "CANCELLED")
-              }
-              disabled={isLoading}
-              className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Cancel
-            </button>
-          </div>
+          <span className="text-sm font-medium text-blue-600">
+            Accepted — waiting for kitchen
+          </span>
         );
 
       case "PREPARING":
         return (
-          <button
-            type="button"
-            onClick={() =>
-              updateOrderStatus(order._id, "READY")
-            }
-            disabled={isLoading}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isLoading ? "Updating..." : "Mark Ready"}
-          </button>
+          <span className="text-sm font-medium text-orange-600">
+            Kitchen is preparing this order
+          </span>
         );
 
       case "READY":
         return (
-          <button
-            type="button"
-            onClick={() =>
-              updateOrderStatus(order._id, "SERVED")
-            }
-            disabled={isLoading}
-            className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isLoading ? "Updating..." : "Mark Served"}
-          </button>
+          <span className="text-sm font-medium text-emerald-600">
+            Ready — waiting for waiter
+          </span>
         );
 
       case "SERVED":
         return (
-          <button
-            type="button"
-            onClick={() =>
-              updateOrderStatus(order._id, "COMPLETED")
-            }
-            disabled={isLoading}
-            className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isLoading ? "Updating..." : "Complete Order"}
-          </button>
+          <span className="text-sm font-medium text-purple-600">
+            Served — waiting for billing
+          </span>
         );
 
       case "COMPLETED":
@@ -520,11 +567,16 @@ export default function OrdersPage() {
     },
   ];
 
+  /* =====================================================
+     LOADING
+  ===================================================== */
+
   if (loading) {
     return (
       <div className="flex min-h-[70vh] items-center justify-center">
         <div className="text-center">
           <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-gray-900" />
+
           <p className="text-sm text-gray-500">
             Loading orders...
           </p>
@@ -533,8 +585,13 @@ export default function OrdersPage() {
     );
   }
 
+  /* =====================================================
+     PAGE
+  ===================================================== */
+
   return (
     <div className="space-y-6">
+
       {/* Header */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
@@ -547,19 +604,23 @@ export default function OrdersPage() {
           </h1>
 
           <p className="mt-1 text-sm text-gray-500">
-            Manage incoming orders and track their progress.
+            Manage incoming orders and monitor their progress.
           </p>
         </div>
 
         <button
           type="button"
-          onClick={() => loadOrders(false)}
+          onClick={() =>
+            loadOrders(false)
+          }
           disabled={refreshing}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <svg
             className={`h-4 w-4 ${
-              refreshing ? "animate-spin" : ""
+              refreshing
+                ? "animate-spin"
+                : ""
             }`}
             viewBox="0 0 24 24"
             fill="none"
@@ -573,7 +634,9 @@ export default function OrdersPage() {
             />
           </svg>
 
-          {refreshing ? "Refreshing..." : "Refresh"}
+          {refreshing
+            ? "Refreshing..."
+            : "Refresh"}
         </button>
       </div>
 
@@ -584,8 +647,27 @@ export default function OrdersPage() {
 
           <button
             type="button"
-            onClick={() => setError("")}
+            onClick={() =>
+              setError("")
+            }
             className="font-semibold text-red-500 hover:text-red-700"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* Success */}
+      {success && (
+        <div className="flex items-start justify-between gap-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          <span>{success}</span>
+
+          <button
+            type="button"
+            onClick={() =>
+              setSuccess("")
+            }
+            className="font-semibold text-emerald-600 hover:text-emerald-800"
           >
             ×
           </button>
@@ -625,37 +707,85 @@ export default function OrdersPage() {
         />
       </div>
 
+      {/* Workflow Notice */}
+      <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-4">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
+            <svg
+              className="h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <circle
+                cx="12"
+                cy="12"
+                r="9"
+              />
+
+              <path
+                d="M12 8v4"
+                strokeLinecap="round"
+              />
+
+              <path
+                d="M12 16h.01"
+                strokeLinecap="round"
+              />
+            </svg>
+          </div>
+
+          <div>
+            <p className="text-sm font-semibold text-blue-900">
+              Order workflow
+            </p>
+
+            <p className="mt-1 text-xs leading-5 text-blue-800">
+              You accept or cancel new orders here.
+              Kitchen handles preparation, waiter handles
+              serving, and cashier handles payment.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Filters */}
       <div className="overflow-x-auto">
         <div className="flex min-w-max gap-2 rounded-xl border border-gray-200 bg-white p-2 shadow-sm">
-          {filterButtons.map((button) => {
-            const active = filter === button.key;
+          {filterButtons.map(
+            (button) => {
+              const active =
+                filter === button.key;
 
-            return (
-              <button
-                key={button.key}
-                type="button"
-                onClick={() => setFilter(button.key)}
-                className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
-                  active
-                    ? "bg-gray-900 text-white"
-                    : "text-gray-600 hover:bg-gray-100"
-                }`}
-              >
-                {button.label}
-
-                <span
-                  className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+              return (
+                <button
+                  key={button.key}
+                  type="button"
+                  onClick={() =>
+                    setFilter(button.key)
+                  }
+                  className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
                     active
-                      ? "bg-white/15 text-white"
-                      : "bg-gray-100 text-gray-500"
+                      ? "bg-gray-900 text-white"
+                      : "text-gray-600 hover:bg-gray-100"
                   }`}
                 >
-                  {button.count}
-                </span>
-              </button>
-            );
-          })}
+                  {button.label}
+
+                  <span
+                    className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                      active
+                        ? "bg-white/15 text-white"
+                        : "bg-gray-100 text-gray-500"
+                    }`}
+                  >
+                    {button.count}
+                  </span>
+                </button>
+              );
+            }
+          )}
         </div>
       </div>
 
@@ -688,145 +818,184 @@ export default function OrdersPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredOrders.map((order) => {
-            const status =
-              statusConfig[order.status];
+          {filteredOrders.map(
+            (order) => {
+              const status =
+                statusConfig[
+                  order.status
+                ];
 
-            const payment =
-              paymentConfig[order.paymentStatus];
+              const payment =
+                paymentConfig[
+                  order.paymentStatus
+                ];
 
-            return (
-              <div
-                key={order._id}
-                className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition hover:shadow-md"
-              >
-                {/* Top */}
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="flex items-start gap-4">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gray-900 text-sm font-bold text-white">
-                      #{order.orderNumber}
-                    </div>
-
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-base font-semibold text-gray-900">
-                          Order #{order.orderNumber}
-                        </h2>
-
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-xs font-medium ${status.className}`}
-                        >
-                          {status.label}
-                        </span>
+              return (
+                <div
+                  key={order._id}
+                  className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition hover:shadow-md"
+                >
+                  {/* Top */}
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="flex items-start gap-4">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gray-900 text-sm font-bold text-white">
+                        #{order.orderNumber}
                       </div>
 
-                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
-                        <span>
-                          {getTableName(order.tableId)}
-                        </span>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h2 className="text-base font-semibold text-gray-900">
+                            Order #
+                            {order.orderNumber}
+                          </h2>
 
-                        <span>•</span>
-
-                        <span>
-                          {getSourceLabel(order.source)}
-                        </span>
-
-                        <span>•</span>
-
-                        <span>
-                          {formatTime(order.createdAt)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="text-left lg:text-right">
-                    <p className="text-lg font-bold text-gray-900">
-                      {formatCurrency(order.total)}
-                    </p>
-
-                    <span
-                      className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${payment.className}`}
-                    >
-                      {payment.label}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Customer */}
-                {(order.customerName ||
-                  order.customerPhone) && (
-                  <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3">
-                    <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
-                      {order.customerName && (
-                        <span className="font-medium text-gray-800">
-                          {order.customerName}
-                        </span>
-                      )}
-
-                      {order.customerPhone && (
-                        <span className="text-gray-500">
-                          {order.customerPhone}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Items preview */}
-                <div className="mt-4">
-                  <div className="space-y-2">
-                    {order.items
-                      .slice(0, 3)
-                      .map((item, index) => (
-                        <div
-                          key={`${order._id}-${index}`}
-                          className="flex items-center justify-between gap-4 text-sm"
-                        >
-                          <div className="flex min-w-0 items-center gap-3">
-                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gray-100 text-xs font-semibold text-gray-600">
-                              {item.quantity}
-                            </span>
-
-                            <span className="truncate text-gray-700">
-                              {item.name}
-                            </span>
-                          </div>
-
-                          <span className="shrink-0 font-medium text-gray-800">
-                            {formatCurrency(item.total)}
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-xs font-medium ${status.className}`}
+                          >
+                            {status.label}
                           </span>
                         </div>
-                      ))}
 
-                    {order.items.length > 3 && (
-                      <p className="pt-1 text-xs text-gray-400">
-                        + {order.items.length - 3} more item
-                        {order.items.length - 3 !== 1
-                          ? "s"
-                          : ""}
+                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
+                          <span>
+                            {getTableName(
+                              order.tableId
+                            )}
+                          </span>
+
+                          <span>•</span>
+
+                          <span>
+                            {getSourceLabel(
+                              order.source
+                            )}
+                          </span>
+
+                          <span>•</span>
+
+                          <span>
+                            {formatTime(
+                              order.createdAt
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-left lg:text-right">
+                      <p className="text-lg font-bold text-gray-900">
+                        {formatCurrency(
+                          order.total
+                        )}
                       </p>
-                    )}
+
+                      <span
+                        className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${payment.className}`}
+                      >
+                        {payment.label}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Customer */}
+                  {(order.customerName ||
+                    order.customerPhone) && (
+                    <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3">
+                      <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+                        {order.customerName && (
+                          <span className="font-medium text-gray-800">
+                            {order.customerName}
+                          </span>
+                        )}
+
+                        {order.customerPhone && (
+                          <span className="text-gray-500">
+                            {order.customerPhone}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Items */}
+                  <div className="mt-4">
+                    <div className="space-y-2">
+                      {order.items
+                        .slice(0, 3)
+                        .map(
+                          (
+                            item,
+                            index
+                          ) => (
+                            <div
+                              key={`${order._id}-${index}`}
+                              className="flex items-center justify-between gap-4 text-sm"
+                            >
+                              <div className="flex min-w-0 items-center gap-3">
+                                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gray-100 text-xs font-semibold text-gray-600">
+                                  {
+                                    item.quantity
+                                  }
+                                </span>
+
+                                <span className="truncate text-gray-700">
+                                  {
+                                    item.name
+                                  }
+                                </span>
+                              </div>
+
+                              <span className="shrink-0 font-medium text-gray-800">
+                                {formatCurrency(
+                                  item.total
+                                )}
+                              </span>
+                            </div>
+                          )
+                        )}
+
+                      {order.items
+                        .length > 3 && (
+                        <p className="pt-1 text-xs text-gray-400">
+                          +{" "}
+                          {order.items
+                            .length - 3}{" "}
+                          more item
+                          {order.items
+                            .length -
+                            3 !==
+                          1
+                            ? "s"
+                            : ""}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="mt-5 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedOrder(
+                          order
+                        )
+                      }
+                      className="text-left text-sm font-medium text-gray-600 transition hover:text-gray-900"
+                    >
+                      View order details →
+                    </button>
+
+                    <div>
+                      {getOrderActions(
+                        order
+                      )}
+                    </div>
                   </div>
                 </div>
-
-                {/* Actions */}
-                <div className="mt-5 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSelectedOrder(order)
-                    }
-                    className="text-left text-sm font-medium text-gray-600 transition hover:text-gray-900"
-                  >
-                    View order details →
-                  </button>
-
-                  <div>{getOrderActions(order)}</div>
-                </div>
-              </div>
-            );
-          })}
+              );
+            }
+          )}
         </div>
       )}
 
@@ -835,44 +1004,64 @@ export default function OrdersPage() {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setSelectedOrder(null);
+            if (
+              event.target ===
+              event.currentTarget
+            ) {
+              setSelectedOrder(
+                null
+              );
             }
           }}
         >
           <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+
             {/* Modal Header */}
             <div className="flex items-start justify-between border-b border-gray-200 px-6 py-5">
               <div>
                 <div className="flex items-center gap-3">
                   <h2 className="text-xl font-bold text-gray-900">
-                    Order #{selectedOrder.orderNumber}
+                    Order #
+                    {
+                      selectedOrder.orderNumber
+                    }
                   </h2>
 
                   <span
                     className={`rounded-full px-2.5 py-1 text-xs font-medium ${
                       statusConfig[
-                        selectedOrder.status
+                        selectedOrder
+                          .status
                       ].className
                     }`}
                   >
                     {
                       statusConfig[
-                        selectedOrder.status
+                        selectedOrder
+                          .status
                       ].label
                     }
                   </span>
                 </div>
 
                 <p className="mt-1 text-sm text-gray-500">
-                  {formatDate(selectedOrder.createdAt)} at{" "}
-                  {formatTime(selectedOrder.createdAt)}
+                  {formatDate(
+                    selectedOrder.createdAt
+                  )}{" "}
+                  at{" "}
+                  {formatTime(
+                    selectedOrder.createdAt
+                  )}
                 </p>
               </div>
 
               <button
                 type="button"
-                onClick={() => setSelectedOrder(null)}
+                onClick={() =>
+                  setSelectedOrder(
+                    null
+                  )
+                }
                 className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
               >
                 <svg
@@ -893,6 +1082,7 @@ export default function OrdersPage() {
 
             {/* Modal Content */}
             <div className="overflow-y-auto px-6 py-5">
+
               {/* Order Information */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <InfoBox
@@ -905,7 +1095,8 @@ export default function OrdersPage() {
                 <InfoBox
                   label="Order Type"
                   value={
-                    selectedOrder.orderType === "DINE_IN"
+                    selectedOrder.orderType ===
+                    "DINE_IN"
                       ? "Dine In"
                       : "Takeaway"
                   }
@@ -922,7 +1113,8 @@ export default function OrdersPage() {
                   label="Payment"
                   value={
                     paymentConfig[
-                      selectedOrder.paymentStatus
+                      selectedOrder
+                        .paymentStatus
                     ].label
                   }
                 />
@@ -942,7 +1134,9 @@ export default function OrdersPage() {
                         <span className="font-medium text-gray-800">
                           Name:
                         </span>{" "}
-                        {selectedOrder.customerName}
+                        {
+                          selectedOrder.customerName
+                        }
                       </p>
                     )}
 
@@ -951,7 +1145,9 @@ export default function OrdersPage() {
                         <span className="font-medium text-gray-800">
                           Phone:
                         </span>{" "}
-                        {selectedOrder.customerPhone}
+                        {
+                          selectedOrder.customerPhone
+                        }
                       </p>
                     )}
                   </div>
@@ -966,19 +1162,27 @@ export default function OrdersPage() {
 
                 <div className="mt-3 overflow-hidden rounded-xl border border-gray-200">
                   {selectedOrder.items.map(
-                    (item, index) => (
+                    (
+                      item,
+                      index
+                    ) => (
                       <div
                         key={`${selectedOrder._id}-item-${index}`}
                         className={`flex items-start justify-between gap-4 px-4 py-3 ${
                           index !==
-                          selectedOrder.items.length - 1
+                          selectedOrder
+                            .items
+                            .length -
+                            1
                             ? "border-b border-gray-100"
                             : ""
                         }`}
                       >
                         <div className="flex min-w-0 gap-3">
                           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gray-100 text-xs font-semibold text-gray-700">
-                            {item.quantity}
+                            {
+                              item.quantity
+                            }
                           </span>
 
                           <div className="min-w-0">
@@ -988,18 +1192,26 @@ export default function OrdersPage() {
 
                             {item.notes && (
                               <p className="mt-1 text-xs text-gray-500">
-                                Note: {item.notes}
+                                Note:{" "}
+                                {
+                                  item.notes
+                                }
                               </p>
                             )}
 
                             <p className="mt-1 text-xs text-gray-400">
-                              {formatCurrency(item.price)} each
+                              {formatCurrency(
+                                item.price
+                              )}{" "}
+                              each
                             </p>
                           </div>
                         </div>
 
                         <p className="shrink-0 font-semibold text-gray-800">
-                          {formatCurrency(item.total)}
+                          {formatCurrency(
+                            item.total
+                          )}
                         </p>
                       </div>
                     )
@@ -1007,7 +1219,7 @@ export default function OrdersPage() {
                 </div>
               </div>
 
-              {/* Order Notes */}
+              {/* Notes */}
               {selectedOrder.notes && (
                 <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
                   <h3 className="text-sm font-semibold text-amber-800">
@@ -1015,7 +1227,9 @@ export default function OrdersPage() {
                   </h3>
 
                   <p className="mt-1 text-sm text-amber-700">
-                    {selectedOrder.notes}
+                    {
+                      selectedOrder.notes
+                    }
                   </p>
                 </div>
               )}
@@ -1041,7 +1255,9 @@ export default function OrdersPage() {
                     </span>
 
                     <span className="font-medium text-gray-800">
-                      {formatCurrency(selectedOrder.tax)}
+                      {formatCurrency(
+                        selectedOrder.tax
+                      )}
                     </span>
                   </div>
 
@@ -1080,15 +1296,21 @@ export default function OrdersPage() {
                   Order Actions
                 </h3>
 
-                {getOrderActions(selectedOrder)}
+                {getOrderActions(
+                  selectedOrder
+                )}
               </div>
             </div>
 
-            {/* Modal Footer */}
+            {/* Footer */}
             <div className="border-t border-gray-200 px-6 py-4">
               <button
                 type="button"
-                onClick={() => setSelectedOrder(null)}
+                onClick={() =>
+                  setSelectedOrder(
+                    null
+                  )
+                }
                 className="w-full rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
               >
                 Close
@@ -1100,6 +1322,10 @@ export default function OrdersPage() {
     </div>
   );
 }
+
+/* =========================================================
+   INFO BOX
+========================================================= */
 
 function InfoBox({
   label,
@@ -1120,6 +1346,10 @@ function InfoBox({
     </div>
   );
 }
+
+/* =========================================================
+   STAT CARD
+========================================================= */
 
 function StatCard({
   title,
@@ -1182,7 +1412,11 @@ function StatCard({
           d="M12 6v6l4 2"
         />
 
-        <circle cx="12" cy="12" r="9" />
+        <circle
+          cx="12"
+          cy="12"
+          r="9"
+        />
       </svg>
     ),
 
