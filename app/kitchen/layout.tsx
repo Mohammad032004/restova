@@ -15,33 +15,17 @@ export default async function KitchenLayout({
 }: KitchenLayoutProps) {
   const session = await getServerSession(authOptions);
 
-  // ------------------------------------------------------------
-  // 1. Authentication
-  // ------------------------------------------------------------
-
   if (!session?.user) {
     redirect("/auth/login");
   }
-
-  // ------------------------------------------------------------
-  // 2. Role authorization
-  // ------------------------------------------------------------
 
   if (session.user.role !== "KITCHEN") {
     redirect("/auth/login");
   }
 
-  // ------------------------------------------------------------
-  // 3. Restaurant authorization
-  // ------------------------------------------------------------
-
   if (!session.user.restaurantId) {
     redirect("/auth/login");
   }
-
-  // ------------------------------------------------------------
-  // 4. Verify restaurant
-  // ------------------------------------------------------------
 
   await connectDB();
 
@@ -56,46 +40,32 @@ export default async function KitchenLayout({
     redirect("/auth/login");
   }
 
-  // ------------------------------------------------------------
-  // 5. Kitchen shell
-  // ------------------------------------------------------------
-
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white">
-        <div className="flex h-16 items-center justify-between px-5 sm:px-7">
-          {/* Brand */}
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white">
-              R
-            </div>
+      <header className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 md:px-8">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-indigo-600">
+              Restova
+            </p>
 
-            <div>
-              <p className="text-base font-bold leading-tight text-slate-950">
-                Restova
-              </p>
-
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                Kitchen
-              </p>
-            </div>
+            <h1 className="text-lg font-bold text-slate-900">
+              {restaurant.name}
+            </h1>
           </div>
 
-          {/* Restaurant */}
-          <div className="hidden text-right sm:block">
+          <div className="text-right">
             <p className="text-sm font-semibold text-slate-900">
-              {restaurant.name}
+              {session.user.name || "Kitchen Staff"}
             </p>
 
             <p className="text-xs text-slate-500">
-              Kitchen Panel
+              Kitchen
             </p>
           </div>
         </div>
       </header>
 
-      {/* Main */}
       <main>{children}</main>
     </div>
   );
