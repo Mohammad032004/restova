@@ -240,23 +240,23 @@ export default function SuperAdminShell({
                       <Link
                         key={item.href}
                         href={item.href}
-                        className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
-                          active
-                            ? "bg-slate-950 text-white shadow-sm"
-                            : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
-                        }`}
+                        className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all duration-200 ${
+  active
+    ? "bg-slate-50 font-semibold text-slate-950"
+    : "font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+}`}
                       >
                         {active && (
-                          <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-white" />
-                        )}
+  <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-indigo-600" />
+)}
 
                         <span
-                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${
-                            active
-                              ? "bg-white/10 text-white"
-                              : "bg-slate-100 text-slate-500 group-hover:bg-slate-200 group-hover:text-slate-900"
-                          }`}
-                        >
+  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-all ${
+    active
+      ? "bg-indigo-100 text-indigo-600"
+      : "bg-slate-100 text-slate-500 group-hover:bg-slate-200 group-hover:text-slate-900"
+  }`}
+>
                           <Icon size={17} strokeWidth={1.9} />
                         </span>
 
