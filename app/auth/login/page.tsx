@@ -69,7 +69,7 @@ switch (session.user.role) {
 
   case "RESTAURANT_OWNER":
   case "MANAGER":
-    window.location.href = "/dashboard";
+    window.location.href = "/restaurant";
     break;
 
   case "KITCHEN":
@@ -94,7 +94,7 @@ switch (session.user.role) {
         case "KITCHEN":
         case "WAITER":
         case "CASHIER":
-          window.location.href = "/dashboard";
+          window.location.href = "/restaurant";
           break;
 
         default:
