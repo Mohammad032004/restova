@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+
 import Link from "next/link";
+
 import {
-  ArrowLeft,
   CheckCircle2,
   Clock3,
   Eye,
@@ -20,6 +21,7 @@ import {
 
 interface Application {
   _id: string;
+
   restaurantName: string;
   restaurantType?: string;
   numberOfTables?: number;
@@ -189,15 +191,14 @@ export default function ApplicationsPage() {
   }
 
   async function deleteApplication(application: Application) {
-    if (application.status === "APPROVED") {
-      alert(
-        "Approved applications cannot be deleted because the restaurant and owner account have already been created."
-      );
-      return;
-    }
+    const isApproved = application.status === "APPROVED";
+
+    const confirmationMessage = isApproved
+      ? `Delete approved application for "${application.restaurantName}"?\n\nWARNING: This will permanently delete:\n\n• The application\n• The restaurant\n• The restaurant owner account\n• The owner password invitation\n\nThis action cannot be undone.`
+      : `Delete application for "${application.restaurantName}"?\n\nThis action cannot be undone.`;
 
     const confirmed = window.confirm(
-      `Delete application for "${application.restaurantName}"?\n\nThis action cannot be undone.`
+      confirmationMessage
     );
 
     if (!confirmed) {
@@ -256,7 +257,9 @@ export default function ApplicationsPage() {
     });
   }
 
-  function getStatusClasses(status: Application["status"]) {
+  function getStatusClasses(
+    status: Application["status"]
+  ) {
     switch (status) {
       case "APPROVED":
         return "bg-emerald-50 text-emerald-700 border-emerald-200";
@@ -269,7 +272,9 @@ export default function ApplicationsPage() {
     }
   }
 
-  function getStatusIcon(status: Application["status"]) {
+  function getStatusIcon(
+    status: Application["status"]
+  ) {
     if (status === "APPROVED") {
       return <CheckCircle2 size={14} />;
     }
@@ -346,6 +351,7 @@ export default function ApplicationsPage() {
 
       {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Total */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
@@ -367,6 +373,7 @@ export default function ApplicationsPage() {
           </div>
         </div>
 
+        {/* Pending */}
         <div className="rounded-2xl border border-amber-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
@@ -388,6 +395,7 @@ export default function ApplicationsPage() {
           </div>
         </div>
 
+        {/* Approved */}
         <div className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
@@ -409,6 +417,7 @@ export default function ApplicationsPage() {
           </div>
         </div>
 
+        {/* Rejected */}
         <div className="rounded-2xl border border-red-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
@@ -485,6 +494,11 @@ export default function ApplicationsPage() {
               const isDeleting =
                 deletingId === application._id;
 
+              const isBusy =
+                isApproving ||
+                isRejecting ||
+                isDeleting;
+
               return (
                 <div
                   key={application._id}
@@ -541,6 +555,7 @@ export default function ApplicationsPage() {
 
                       {/* Details */}
                       <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        {/* Owner */}
                         <div className="rounded-xl bg-slate-50 p-4">
                           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
                             <User size={14} />
@@ -566,6 +581,7 @@ export default function ApplicationsPage() {
                           )}
                         </div>
 
+                        {/* Location */}
                         <div className="rounded-xl bg-slate-50 p-4">
                           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
                             <MapPin size={14} />
@@ -588,6 +604,7 @@ export default function ApplicationsPage() {
                           </p>
                         </div>
 
+                        {/* Application */}
                         <div className="rounded-xl bg-slate-50 p-4">
                           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
                             <FileText size={14} />
@@ -606,7 +623,8 @@ export default function ApplicationsPage() {
                     </div>
 
                     {/* Actions */}
-                    <div className="flex flex-wrap items-center gap-2 xl:w-[300px] xl:justify-end">
+                    <div className="flex flex-wrap items-center gap-2 xl:w-[340px] xl:justify-end">
+                      {/* View */}
                       <Link
                         href={`/super-admin/applications/${application._id}`}
                         className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
@@ -615,15 +633,12 @@ export default function ApplicationsPage() {
                         View
                       </Link>
 
+                      {/* Approve / Reject */}
                       {application.status === "PENDING" && (
                         <>
                           <button
                             type="button"
-                            disabled={
-                              isApproving ||
-                              isRejecting ||
-                              isDeleting
-                            }
+                            disabled={isBusy}
                             onClick={() =>
                               approveApplication(
                                 application._id
@@ -640,11 +655,7 @@ export default function ApplicationsPage() {
 
                           <button
                             type="button"
-                            disabled={
-                              isApproving ||
-                              isRejecting ||
-                              isDeleting
-                            }
+                            disabled={isBusy}
                             onClick={() =>
                               rejectApplication(
                                 application._id
@@ -661,31 +672,28 @@ export default function ApplicationsPage() {
                         </>
                       )}
 
-                      {/* DELETE */}
-                      {application.status !== "APPROVED" && (
-                        <button
-                          type="button"
-                          disabled={
-                            isApproving ||
-                            isRejecting ||
-                            isDeleting
-                          }
-                          onClick={() =>
-                            deleteApplication(
-                              application
-                            )
-                          }
-                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          title="Delete application"
-                        >
-                          <Trash2 size={16} />
+                      {/* Delete */}
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() =>
+                          deleteApplication(application)
+                        }
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        title={
+                          application.status === "APPROVED"
+                            ? "Delete application and related restaurant data"
+                            : "Delete application"
+                        }
+                      >
+                        <Trash2 size={16} />
 
-                          {isDeleting
-                            ? "Deleting..."
-                            : "Delete"}
-                        </button>
-                      )}
+                        {isDeleting
+                          ? "Deleting..."
+                          : "Delete"}
+                      </button>
 
+                      {/* Approved indicator */}
                       {application.status === "APPROVED" && (
                         <span className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs font-medium text-slate-500">
                           <CheckCircle2 size={15} />
