@@ -1,31 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import {
-  CheckCircle2,
-  Clock3,
-  Loader2,
-  LogOut,
-  ReceiptText,
-  RefreshCw,
-  Sparkles,
-  Utensils,
-  Users,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type TableStatus =
   | "AVAILABLE"
   | "OCCUPIED"
   | "BILL_REQUESTED"
   | "CLEANING";
-
-interface Table {
-  _id: string;
-  name: string;
-  number: number;
-  capacity: number;
-  status: TableStatus;
-}
 
 type OrderStatus =
   | "PLACED"
@@ -42,18 +23,37 @@ type PaymentStatus =
   | "FAILED"
   | "REFUNDED";
 
-interface Order {
+interface RestaurantTable {
+  _id: string;
+  name: string;
+  number: number;
+  capacity: number;
+  status: TableStatus;
+  qrToken?: string;
+}
+
+interface OrderTable {
+  _id: string;
+  name: string;
+  number: number;
+  capacity: number;
+  status: TableStatus;
+}
+
+interface OrderItem {
+  name: string;
+  quantity: number;
+  price: number;
+  total: number;
+  notes?: string;
+}
+
+interface RestaurantOrder {
   _id: string;
   orderNumber: number;
-  tableId?: {
-    _id: string;
-    name: string;
-    number: number;
-    capacity: number;
-    status: TableStatus;
-  } | null;
-  orderType: string;
-  source: string;
+  orderType: "DINE_IN" | "TAKEAWAY";
+  source: "CUSTOMER_QR" | "WAITER" | "STAFF";
+  items: OrderItem[];
   subtotal: number;
   tax: number;
   discount: number;
@@ -61,88 +61,123 @@ interface Order {
   status: OrderStatus;
   paymentStatus: PaymentStatus;
   paymentMethod?: string;
+  paymentId?: string;
   customerName?: string;
   customerPhone?: string;
   notes?: string;
+  tableId?: OrderTable | null;
   createdAt: string;
-  items: {
-    name: string;
-    quantity: number;
-    price: number;
-    total: number;
-    notes?: string;
-  }[];
+  updatedAt: string;
 }
 
 interface TablesResponse {
   success: boolean;
-  tables: Table[];
   message?: string;
+  tables?: RestaurantTable[];
 }
 
 interface OrdersResponse {
   success: boolean;
-  orders: Order[];
   message?: string;
+  orders?: RestaurantOrder[];
 }
 
-const statusConfig: Record<
+const tableStatusStyles: Record<
   TableStatus,
   {
-    label: string;
-    className: string;
-    icon: typeof CheckCircle2;
+    badge: string;
+    border: string;
+    background: string;
+    dot: string;
   }
 > = {
   AVAILABLE: {
-    label: "Available",
-    className: "bg-emerald-50 text-emerald-700",
-    icon: CheckCircle2,
+    badge: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    border: "border-emerald-200",
+    background: "bg-emerald-50/40",
+    dot: "bg-emerald-500",
   },
   OCCUPIED: {
-    label: "Occupied",
-    className: "bg-orange-50 text-orange-700",
-    icon: Utensils,
+    badge: "bg-amber-50 text-amber-700 border-amber-200",
+    border: "border-amber-200",
+    background: "bg-amber-50/40",
+    dot: "bg-amber-500",
   },
   BILL_REQUESTED: {
-    label: "Bill Requested",
-    className: "bg-blue-50 text-blue-700",
-    icon: ReceiptText,
+    badge: "bg-orange-50 text-orange-700 border-orange-200",
+    border: "border-orange-200",
+    background: "bg-orange-50/40",
+    dot: "bg-orange-500",
   },
   CLEANING: {
-    label: "Cleaning",
-    className: "bg-slate-100 text-slate-700",
-    icon: Sparkles,
+    badge: "bg-blue-50 text-blue-700 border-blue-200",
+    border: "border-blue-200",
+    background: "bg-blue-50/40",
+    dot: "bg-blue-500",
   },
 };
 
+const orderStatusStyles: Record<OrderStatus, string> = {
+  PLACED: "bg-slate-100 text-slate-700",
+  ACCEPTED: "bg-indigo-100 text-indigo-700",
+  PREPARING: "bg-amber-100 text-amber-700",
+  READY: "bg-emerald-100 text-emerald-700",
+  SERVED: "bg-blue-100 text-blue-700",
+  COMPLETED: "bg-slate-200 text-slate-700",
+  CANCELLED: "bg-red-100 text-red-700",
+};
+
+const paymentStatusStyles: Record<PaymentStatus, string> = {
+  PENDING: "bg-amber-100 text-amber-700",
+  PAID: "bg-emerald-100 text-emerald-700",
+  FAILED: "bg-red-100 text-red-700",
+  REFUNDED: "bg-purple-100 text-purple-700",
+};
+
 function formatCurrency(value: number) {
-  return `₹${value.toFixed(2)}`;
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
-function formatTime(value: string) {
-  return new Date(value).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function formatDate(value: string) {
+  try {
+    return new Intl.DateTimeFormat("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
 }
 
-export default function WaiterPage() {
-  const [tables, setTables] = useState<Table[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
+function formatStatus(status: string) {
+  return status
+    .replaceAll("_", " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+export default function WaiterDashboardPage() {
+  const [tables, setTables] = useState<RestaurantTable[]>([]);
+  const [orders, setOrders] = useState<RestaurantOrder[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [updatingTableId, setUpdatingTableId] =
-    useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  async function loadData(isRefresh = false) {
-    try {
-      if (isRefresh) {
+  const loadData = useCallback(
+    async (showRefreshLoader = false) => {
+      if (showRefreshLoader) {
         setRefreshing(true);
       } else {
         setLoading(true);
@@ -150,89 +185,62 @@ export default function WaiterPage() {
 
       setError("");
 
-      const [tablesResponse, ordersResponse] =
-        await Promise.all([
+      try {
+        const [tablesResponse, ordersResponse] = await Promise.all([
           fetch("/api/restaurant/tables", {
             method: "GET",
             cache: "no-store",
           }),
-
           fetch("/api/restaurant/orders", {
             method: "GET",
             cache: "no-store",
           }),
         ]);
 
-      const tablesResult: TablesResponse =
-        await tablesResponse.json();
+        const tablesData: TablesResponse = await tablesResponse.json();
+        const ordersData: OrdersResponse = await ordersResponse.json();
 
-      const ordersResult: OrdersResponse =
-        await ordersResponse.json();
+        if (!tablesResponse.ok || !tablesData.success) {
+          throw new Error(
+            tablesData.message || "Failed to load restaurant tables."
+          );
+        }
 
-      if (
-        !tablesResponse.ok ||
-        !tablesResult.success
-      ) {
-        throw new Error(
-          tablesResult.message ||
-            "Failed to load tables."
+        if (!ordersResponse.ok || !ordersData.success) {
+          throw new Error(
+            ordersData.message || "Failed to load restaurant orders."
+          );
+        }
+
+        setTables(tablesData.tables || []);
+        setOrders(ordersData.orders || []);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load waiter dashboard."
         );
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-
-      if (
-        !ordersResponse.ok ||
-        !ordersResult.success
-      ) {
-        throw new Error(
-          ordersResult.message ||
-            "Failed to load orders."
-        );
-      }
-
-      setTables(tablesResult.tables || []);
-      setOrders(ordersResult.orders || []);
-    } catch (error) {
-      console.error("Load waiter dashboard error:", error);
-
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Failed to load waiter dashboard."
-      );
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }
+    },
+    []
+  );
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
-  const activeOrders = useMemo(() => {
-    return orders.filter(
-      (order) =>
-        order.status !== "COMPLETED" &&
-        order.status !== "CANCELLED"
-    );
-  }, [orders]);
-
-  function getTableOrders(tableId: string) {
-    return activeOrders.filter(
-      (order) =>
-        order.tableId?._id === tableId
-    );
-  }
-
-  async function updateTableStatus(
+  const updateTableStatus = async (
     tableId: string,
     status: TableStatus
-  ) {
-    try {
-      setUpdatingTableId(tableId);
-      setError("");
-      setSuccess("");
+  ) => {
+    setActionLoading(`table-${tableId}`);
+    setError("");
+    setSuccess("");
 
+    try {
       const response = await fetch(
         `/api/restaurant/tables/${tableId}`,
         {
@@ -246,84 +254,160 @@ export default function WaiterPage() {
         }
       );
 
-      const result = await response.json();
+      const data = await response.json();
 
-      if (!response.ok || !result.success) {
+      if (!response.ok || !data.success) {
         throw new Error(
-          result.message ||
-            "Failed to update table."
+          data.message || "Failed to update table status."
         );
       }
 
-      setSuccess(result.message);
-
-      await loadData(true);
-    } catch (error) {
-      console.error(
-        "Update waiter table error:",
-        error
+      setSuccess(
+        data.message || "Table status updated successfully."
       );
 
+      await loadData();
+    } catch (err) {
       setError(
-        error instanceof Error
-          ? error.message
-          : "Failed to update table."
+        err instanceof Error
+          ? err.message
+          : "Failed to update table status."
       );
     } finally {
-      setUpdatingTableId(null);
+      setActionLoading(null);
     }
-  }
+  };
+
+  const handleServeOrder = async (orderId: string) => {
+    setActionLoading(`order-${orderId}`);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch(
+        `/api/restaurant/orders/${orderId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            status: "SERVED",
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Failed to mark order as served."
+        );
+      }
+
+      setSuccess(
+        data.message || "Order marked as served."
+      );
+
+      await loadData();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to mark order as served."
+      );
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const availableTables = useMemo(
+    () => tables.filter((table) => table.status === "AVAILABLE").length,
+    [tables]
+  );
+
+  const occupiedTables = useMemo(
+    () => tables.filter((table) => table.status === "OCCUPIED").length,
+    [tables]
+  );
+
+  const billRequestedTables = useMemo(
+    () =>
+      tables.filter(
+        (table) => table.status === "BILL_REQUESTED"
+      ).length,
+    [tables]
+  );
+
+  const cleaningTables = useMemo(
+    () => tables.filter((table) => table.status === "CLEANING").length,
+    [tables]
+  );
+
+  const activeOrders = useMemo(
+    () =>
+      orders.filter(
+        (order) =>
+          order.status !== "COMPLETED" &&
+          order.status !== "CANCELLED"
+      ),
+    [orders]
+  );
+
+  const readyOrders = useMemo(
+    () =>
+      orders.filter(
+        (order) => order.status === "READY"
+      ),
+    [orders]
+  );
+
+  const servedOrders = useMemo(
+    () =>
+      orders.filter(
+        (order) => order.status === "SERVED"
+      ),
+    [orders]
+  );
 
   if (loading) {
     return (
-      <main className="flex min-h-[calc(100vh-64px)] items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2
-            size={32}
-            className="animate-spin text-indigo-600"
-          />
-
-          <p className="text-sm text-slate-500">
-            Loading waiter dashboard...
-          </p>
+      <div className="min-h-[calc(100vh-64px)] bg-slate-50">
+        <div className="mx-auto max-w-7xl px-5 py-8 md:px-8">
+          <div className="animate-pulse space-y-6">
+            <div className="h-8 w-64 rounded-lg bg-slate-200" />
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="h-28 rounded-2xl bg-white shadow-sm"
+                />
+              ))}
+            </div>
+            <div className="h-72 rounded-2xl bg-white shadow-sm" />
+          </div>
         </div>
-      </main>
+      </div>
     );
   }
 
-  const availableCount = tables.filter(
-    (table) => table.status === "AVAILABLE"
-  ).length;
-
-  const occupiedCount = tables.filter(
-    (table) => table.status === "OCCUPIED"
-  ).length;
-
-  const billRequestedCount = tables.filter(
-    (table) => table.status === "BILL_REQUESTED"
-  ).length;
-
-  const cleaningCount = tables.filter(
-    (table) => table.status === "CLEANING"
-  ).length;
-
   return (
-    <main className="min-h-[calc(100vh-64px)] bg-slate-50 p-5 md:p-8">
-      <div className="mx-auto max-w-7xl">
+    <div className="min-h-[calc(100vh-64px)] bg-slate-50">
+      <div className="mx-auto max-w-7xl px-5 py-8 md:px-8">
 
         {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-sm font-medium text-indigo-600">
-              Waiter Workspace
+            <p className="mb-1 text-sm font-medium text-indigo-600">
+              Waiter Panel
             </p>
 
-            <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 md:text-3xl">
-              Tables & Service
-            </h1>
+            <h2 className="text-2xl font-bold tracking-tight text-slate-900 md:text-3xl">
+              Restaurant Operations
+            </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              Manage customer tables and service flow.
+              Manage tables, serve ready orders, and handle billing requests.
             </p>
           </div>
 
@@ -331,441 +415,389 @@ export default function WaiterPage() {
             type="button"
             onClick={() => loadData(true)}
             disabled={refreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <RefreshCw
-              size={17}
-              className={
-                refreshing ? "animate-spin" : ""
-              }
-            />
+            <svg
+              className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path
+                d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
 
-            Refresh
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         </div>
 
-        {/* Alerts */}
+        {/* Messages */}
         {error && (
-          <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
+          <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <svg
+              className="mt-0.5 h-5 w-5 shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <path
+                d="M12 8v4"
+                strokeLinecap="round"
+              />
+              <path
+                d="M12 16h.01"
+                strokeLinecap="round"
+              />
+            </svg>
+
+            <span>{error}</span>
           </div>
         )}
 
         {success && (
-          <div className="mt-5 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-            <CheckCircle2 size={17} />
+          <div className="mb-6 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            <svg
+              className="mt-0.5 h-5 w-5 shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <path
+                d="m8.5 12 2.2 2.2 4.8-5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
 
-            {success}
+            <span>{success}</span>
           </div>
         )}
 
-        {/* Summary */}
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Summary Cards */}
+        <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-slate-500">
-              Available
-            </p>
+          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="rounded-xl bg-emerald-50 p-2.5">
+                <svg
+                  className="h-5 w-5 text-emerald-600"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <path
+                    d="m8.5 12 2.2 2.2 4.8-5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
 
-            <p className="mt-2 text-2xl font-bold text-emerald-600">
-              {availableCount}
-            </p>
-
-            <p className="mt-1 text-xs text-slate-400">
-              Ready for customers
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-slate-500">
-              Occupied
-            </p>
-
-            <p className="mt-2 text-2xl font-bold text-orange-600">
-              {occupiedCount}
-            </p>
-
-            <p className="mt-1 text-xs text-slate-400">
-              Customers currently dining
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-slate-500">
-              Bill Requested
-            </p>
-
-            <p className="mt-2 text-2xl font-bold text-blue-600">
-              {billRequestedCount}
-            </p>
-
-            <p className="mt-1 text-xs text-slate-400">
-              Waiting for cashier
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-medium text-slate-500">
-              Cleaning
-            </p>
-
-            <p className="mt-2 text-2xl font-bold text-slate-700">
-              {cleaningCount}
-            </p>
-
-            <p className="mt-1 text-xs text-slate-400">
-              Waiting to be released
-            </p>
-          </div>
-        </div>
-
-        {/* Active Orders */}
-        <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-bold text-slate-900">
-                Active Orders
-              </h2>
-
-              <p className="mt-1 text-xs text-slate-500">
-                Orders currently requiring service.
-              </p>
+              <span className="text-xs font-medium text-slate-400">
+                Tables
+              </span>
             </div>
 
-            <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
-              {activeOrders.length}
-            </span>
-          </div>
-
-          {activeOrders.length === 0 ? (
-            <div className="mt-5 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-5 py-8 text-center">
-              <ReceiptText
-                size={28}
-                className="mx-auto text-slate-300"
-              />
-
-              <p className="mt-3 text-sm font-semibold text-slate-700">
-                No active orders
-              </p>
-
-              <p className="mt-1 text-xs text-slate-400">
-                New customer orders will appear here.
-              </p>
-            </div>
-          ) : (
-            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {activeOrders.slice(0, 12).map(
-                (order) => (
-                  <div
-                    key={order._id}
-                    className="rounded-xl border border-slate-200 p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-bold text-slate-900">
-                          Order #{order.orderNumber}
-                        </p>
-
-                        <p className="mt-1 text-xs text-slate-500">
-                          {order.tableId
-                            ? `Table ${order.tableId.number}`
-                            : "No table"}
-                        </p>
-                      </div>
-
-                      <span className="rounded-full bg-orange-50 px-2.5 py-1 text-[11px] font-semibold text-orange-700">
-                        {order.status}
-                      </span>
-                    </div>
-
-                    <div className="mt-4 space-y-2">
-                      {order.items
-                        .slice(0, 3)
-                        .map((item, index) => (
-                          <div
-                            key={`${order._id}-${index}`}
-                            className="flex items-center justify-between text-xs"
-                          >
-                            <span className="text-slate-600">
-                              {item.quantity} ×{" "}
-                              {item.name}
-                            </span>
-
-                            <span className="font-medium text-slate-800">
-                              {formatCurrency(
-                                item.total
-                              )}
-                            </span>
-                          </div>
-                        ))}
-
-                      {order.items.length > 3 && (
-                        <p className="text-xs text-slate-400">
-                          +{" "}
-                          {order.items.length - 3}{" "}
-                          more item(s)
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
-                      <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                        <Clock3 size={13} />
-                        {formatTime(
-                          order.createdAt
-                        )}
-                      </div>
-
-                      <span className="text-sm font-bold text-slate-900">
-                        {formatCurrency(order.total)}
-                      </span>
-                    </div>
-                  </div>
-                )
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Tables */}
-        <section className="mt-8">
-          <div className="mb-4">
-            <h2 className="text-xl font-bold text-slate-900">
-              Restaurant Tables
-            </h2>
+            <p className="text-3xl font-bold text-slate-900">
+              {availableTables}
+            </p>
 
             <p className="mt-1 text-sm text-slate-500">
-              Handle table service and customer billing requests.
+              Available
             </p>
           </div>
 
-          {tables.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
-              <Users
-                size={32}
-                className="mx-auto text-slate-300"
-              />
+          <div className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="rounded-xl bg-amber-50 p-2.5">
+                <svg
+                  className="h-5 w-5 text-amber-600"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <path
+                    d="M12 8v8"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M8.5 12h7"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </div>
 
-              <h3 className="mt-4 font-bold text-slate-800">
-                No tables configured
+              <span className="text-xs font-medium text-slate-400">
+                Tables
+              </span>
+            </div>
+
+            <p className="text-3xl font-bold text-slate-900">
+              {occupiedTables}
+            </p>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Occupied
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-orange-100 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="rounded-xl bg-orange-50 p-2.5">
+                <svg
+                  className="h-5 w-5 text-orange-600"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path
+                    d="M6 3h12v18H6z"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M9 7h6M9 11h6M9 15h4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </div>
+
+              <span className="text-xs font-medium text-slate-400">
+                Billing
+              </span>
+            </div>
+
+            <p className="text-3xl font-bold text-slate-900">
+              {billRequestedTables}
+            </p>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Bill requested
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="rounded-xl bg-blue-50 p-2.5">
+                <svg
+                  className="h-5 w-5 text-blue-600"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path
+                    d="M4 6h16M4 12h16M4 18h16"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </div>
+
+              <span className="text-xs font-medium text-slate-400">
+                Tables
+              </span>
+            </div>
+
+            <p className="text-3xl font-bold text-slate-900">
+              {cleaningTables}
+            </p>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Cleaning
+            </p>
+          </div>
+        </div>
+
+        {/* Ready Orders Alert */}
+        {readyOrders.length > 0 && (
+          <div className="mb-8 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl bg-emerald-100 p-2.5">
+                  <svg
+                    className="h-5 w-5 text-emerald-700"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path
+                      d="M12 3v18M3 12h18"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </div>
+
+                <div>
+                  <h3 className="font-bold text-emerald-900">
+                    {readyOrders.length} order
+                    {readyOrders.length === 1 ? "" : "s"} ready to serve
+                  </h3>
+
+                  <p className="mt-1 text-sm text-emerald-700">
+                    Kitchen has completed these orders. Please serve them to
+                    the customers.
+                  </p>
+                </div>
+              </div>
+
+              <span className="inline-flex w-fit rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
+                Action Required
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Tables */}
+        <section className="mb-10">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-xl font-bold text-slate-900">
+                Tables
               </h3>
 
               <p className="mt-1 text-sm text-slate-500">
-                Your restaurant does not have any tables yet.
+                Manage table service lifecycle.
+              </p>
+            </div>
+
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+              {tables.length} tables
+            </span>
+          </div>
+
+          {tables.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
+              <p className="font-semibold text-slate-700">
+                No tables found
+              </p>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Tables will appear here once they are created.
               </p>
             </div>
           ) : (
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {tables.map((table) => {
-                const config =
-                  statusConfig[table.status];
-
-                const StatusIcon = config.icon;
-
-                const tableOrders =
-                  getTableOrders(table._id);
-
-                const isUpdating =
-                  updatingTableId === table._id;
+                const styles = tableStatusStyles[table.status];
+                const tableActionLoading =
+                  actionLoading === `table-${table._id}`;
 
                 return (
                   <div
                     key={table._id}
-                    className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+                    className={`rounded-2xl border bg-white p-5 shadow-sm transition hover:shadow-md ${styles.border}`}
                   >
-                    {/* Card header */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-sm font-bold text-white">
-                          {table.number}
-                        </div>
+                    <div className="mb-4 flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`h-2.5 w-2.5 rounded-full ${styles.dot}`}
+                          />
 
-                        <div>
-                          <h3 className="font-bold text-slate-900">
+                          <h4 className="font-bold text-slate-900">
                             {table.name}
-                          </h3>
-
-                          <p className="text-xs text-slate-500">
-                            Table {table.number}
-                          </p>
+                          </h4>
                         </div>
+
+                        <p className="mt-1 text-sm text-slate-500">
+                          Table #{table.number}
+                        </p>
                       </div>
 
                       <span
-                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${config.className}`}
+                        className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${styles.badge}`}
                       >
-                        <StatusIcon size={12} />
-
-                        {config.label}
+                        {formatStatus(table.status)}
                       </span>
                     </div>
 
-                    {/* Capacity */}
-                    <div className="mt-5 flex items-center gap-2 text-sm text-slate-500">
-                      <Users size={16} />
-
+                    <div className="mb-5 flex items-center gap-4 text-sm text-slate-500">
                       <span>
                         Capacity:{" "}
-                        <strong className="text-slate-800">
+                        <strong className="text-slate-700">
                           {table.capacity}
                         </strong>
                       </span>
                     </div>
 
-                    {/* Orders */}
-                    {tableOrders.length > 0 && (
-                      <div className="mt-4 rounded-xl bg-slate-50 p-3">
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs font-semibold text-slate-700">
-                            Active Orders
-                          </p>
-
-                          <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-slate-600">
-                            {tableOrders.length}
-                          </span>
-                        </div>
-
-                        <div className="mt-2 space-y-2">
-                          {tableOrders
-                            .slice(0, 2)
-                            .map((order) => (
-                              <div
-                                key={order._id}
-                                className="flex items-center justify-between text-xs"
-                              >
-                                <span className="text-slate-600">
-                                  Order #
-                                  {order.orderNumber}
-                                </span>
-
-                                <span className="font-semibold text-slate-800">
-                                  {formatCurrency(
-                                    order.total
-                                  )}
-                                </span>
-                              </div>
-                            ))}
-
-                          {tableOrders.length > 2 && (
-                            <p className="text-[11px] text-slate-400">
-                              +
-                              {tableOrders.length -
-                                2}{" "}
-                              more active order(s)
-                            </p>
-                          )}
-                        </div>
+                    {table.status === "AVAILABLE" && (
+                      <div className="rounded-xl bg-emerald-50 px-3 py-2 text-center text-xs font-semibold text-emerald-700">
+                        Ready for customers
                       </div>
                     )}
 
-                    {/* Actions */}
-                    <div className="mt-5 space-y-2">
-                      {table.status ===
-                        "OCCUPIED" && (
-                        <button
-                          type="button"
-                          disabled={isUpdating}
-                          onClick={() =>
-                            updateTableStatus(
-                              table._id,
-                              "BILL_REQUESTED"
-                            )
-                          }
-                          className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {isUpdating ? (
-                            <Loader2
-                              size={16}
-                              className="animate-spin"
-                            />
-                          ) : (
-                            <ReceiptText
-                              size={16}
-                            />
-                          )}
+                    {table.status === "OCCUPIED" && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateTableStatus(
+                            table._id,
+                            "BILL_REQUESTED"
+                          )
+                        }
+                        disabled={tableActionLoading}
+                        className="w-full rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {tableActionLoading
+                          ? "Requesting..."
+                          : "Request Bill"}
+                      </button>
+                    )}
 
-                          Request Bill
-                        </button>
-                      )}
+                    {table.status === "BILL_REQUESTED" && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateTableStatus(
+                            table._id,
+                            "CLEANING"
+                          )
+                        }
+                        disabled={tableActionLoading}
+                        className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {tableActionLoading
+                          ? "Checking..."
+                          : "Start Cleaning"}
+                      </button>
+                    )}
 
-                      {table.status ===
-                        "BILL_REQUESTED" && (
-                        <div className="rounded-xl bg-blue-50 px-3 py-3 text-center">
-                          <p className="text-xs font-semibold text-blue-700">
-                            Bill requested
-                          </p>
-
-                          <p className="mt-1 text-[11px] text-blue-600">
-                            Waiting for cashier payment.
-                          </p>
-                        </div>
-                      )}
-
-                      {table.status ===
-                        "BILL_REQUESTED" && (
-                        <button
-                          type="button"
-                          disabled={isUpdating}
-                          onClick={() =>
-                            updateTableStatus(
-                              table._id,
-                              "CLEANING"
-                            )
-                          }
-                          className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {isUpdating ? (
-                            <Loader2
-                              size={16}
-                              className="animate-spin"
-                            />
-                          ) : (
-                            <Sparkles
-                              size={16}
-                            />
-                          )}
-
-                          Start Cleaning
-                        </button>
-                      )}
-
-                      {table.status ===
-                        "CLEANING" && (
-                        <button
-                          type="button"
-                          disabled={isUpdating}
-                          onClick={() =>
-                            updateTableStatus(
-                              table._id,
-                              "AVAILABLE"
-                            )
-                          }
-                          className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {isUpdating ? (
-                            <Loader2
-                              size={16}
-                              className="animate-spin"
-                            />
-                          ) : (
-                            <CheckCircle2
-                              size={16}
-                            />
-                          )}
-
-                          Release Table
-                        </button>
-                      )}
-
-                      {table.status ===
-                        "AVAILABLE" && (
-                        <div className="rounded-xl bg-emerald-50 px-3 py-3 text-center">
-                          <p className="text-xs font-semibold text-emerald-700">
-                            Ready for customers
-                          </p>
-                        </div>
-                      )}
-                    </div>
+                    {table.status === "CLEANING" && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateTableStatus(
+                            table._id,
+                            "AVAILABLE"
+                          )
+                        }
+                        disabled={tableActionLoading}
+                        className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {tableActionLoading
+                          ? "Releasing..."
+                          : "Release Table"}
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -773,28 +805,316 @@ export default function WaiterPage() {
           )}
         </section>
 
-        {/* Footer note */}
-        <div className="mt-8 rounded-2xl border border-indigo-100 bg-indigo-50 p-4">
-          <div className="flex gap-3">
-            <LogOut
-              size={18}
-              className="mt-0.5 shrink-0 text-indigo-600"
-            />
-
+        {/* Orders */}
+        <section>
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-sm font-semibold text-indigo-900">
-                Table release protection
+              <h3 className="text-xl font-bold text-slate-900">
+                Orders
+              </h3>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Serve ready orders and monitor active service.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
+                Active: {activeOrders.length}
+              </span>
+
+              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                Ready: {readyOrders.length}
+              </span>
+
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                Served: {servedOrders.length}
+              </span>
+            </div>
+          </div>
+
+          {orders.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
+              <p className="font-semibold text-slate-700">
+                No orders found
               </p>
 
-              <p className="mt-1 text-xs leading-5 text-indigo-700">
-                A table cannot be released while it has an
-                incomplete order or an unpaid completed order.
-                Payment and table release remain separate operations.
+              <p className="mt-1 text-sm text-slate-500">
+                New restaurant orders will appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {orders.map((order) => {
+                const orderActionLoading =
+                  actionLoading === `order-${order._id}`;
+
+                return (
+                  <div
+                    key={order._id}
+                    className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+                  >
+                    {/* Order Header */}
+                    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="text-lg font-bold text-slate-900">
+                            Order #{order.orderNumber}
+                          </h4>
+
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${orderStatusStyles[order.status]}`}
+                          >
+                            {formatStatus(order.status)}
+                          </span>
+
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${paymentStatusStyles[order.paymentStatus]}`}
+                          >
+                            {formatStatus(order.paymentStatus)}
+                          </span>
+                        </div>
+
+                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
+                          <span>
+                            {order.orderType === "DINE_IN"
+                              ? "Dine In"
+                              : "Takeaway"}
+                          </span>
+
+                          {order.tableId && (
+                            <span>
+                              Table #{order.tableId.number}
+                            </span>
+                          )}
+
+                          <span>
+                            {formatDate(order.createdAt)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-left md:text-right">
+                        <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                          Total
+                        </p>
+
+                        <p className="text-xl font-bold text-slate-900">
+                          {formatCurrency(order.total)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Customer */}
+                    {(order.customerName || order.customerPhone) && (
+                      <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          Customer
+                        </p>
+
+                        <div className="mt-1 flex flex-wrap gap-3 text-sm text-slate-700">
+                          {order.customerName && (
+                            <span className="font-semibold">
+                              {order.customerName}
+                            </span>
+                          )}
+
+                          {order.customerPhone && (
+                            <span>
+                              {order.customerPhone}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Items */}
+                    <div className="mt-4 border-t border-slate-100 pt-4">
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Items
+                      </p>
+
+                      <div className="space-y-2">
+                        {order.items.map((item, index) => (
+                          <div
+                            key={`${order._id}-${index}`}
+                            className="flex items-start justify-between gap-4 text-sm"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-medium text-slate-800">
+                                {item.quantity} × {item.name}
+                              </p>
+
+                              {item.notes && (
+                                <p className="mt-0.5 text-xs text-slate-500">
+                                  Note: {item.notes}
+                                </p>
+                              )}
+                            </div>
+
+                            <span className="shrink-0 font-semibold text-slate-700">
+                              {formatCurrency(item.total)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Order Notes */}
+                    {order.notes && (
+                      <div className="mt-4 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">
+                          Order Note
+                        </p>
+
+                        <p className="mt-1 text-sm text-amber-800">
+                          {order.notes}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Action */}
+                    {order.status === "READY" && (
+                      <div className="mt-5 border-t border-slate-100 pt-4">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleServeOrder(order._id)
+                          }
+                          disabled={orderActionLoading}
+                          className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {orderActionLoading
+                            ? "Serving..."
+                            : "Mark Order as Served"}
+                        </button>
+                      </div>
+                    )}
+
+                    {order.status === "SERVED" && (
+                      <div className="mt-5 border-t border-slate-100 pt-4">
+                        <div className="flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">
+                          <svg
+                            className="h-5 w-5"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <circle cx="12" cy="12" r="9" />
+                            <path
+                              d="m8.5 12 2.2 2.2 4.8-5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+
+                          Order served. Waiting for billing/payment.
+                        </div>
+                      </div>
+                    )}
+
+                    {order.status === "COMPLETED" && (
+                      <div className="mt-5 border-t border-slate-100 pt-4">
+                        <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600">
+                          Order completed.
+                        </div>
+                      </div>
+                    )}
+
+                    {order.status === "CANCELLED" && (
+                      <div className="mt-5 border-t border-slate-100 pt-4">
+                        <div className="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                          Order cancelled.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* Workflow Information */}
+        <section className="mt-10 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-bold text-slate-900">
+            Waiter Workflow
+          </h3>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-5">
+            <div className="rounded-xl bg-slate-50 p-4">
+              <span className="text-xs font-bold text-slate-400">
+                01
+              </span>
+
+              <p className="mt-2 font-semibold text-slate-800">
+                Customer Orders
+              </p>
+
+              <p className="mt-1 text-xs text-slate-500">
+                Table becomes occupied.
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-slate-50 p-4">
+              <span className="text-xs font-bold text-slate-400">
+                02
+              </span>
+
+              <p className="mt-2 font-semibold text-slate-800">
+                Kitchen Prepares
+              </p>
+
+              <p className="mt-1 text-xs text-slate-500">
+                Order moves to READY.
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-emerald-50 p-4">
+              <span className="text-xs font-bold text-emerald-600">
+                03
+              </span>
+
+              <p className="mt-2 font-semibold text-emerald-800">
+                Serve Order
+              </p>
+
+              <p className="mt-1 text-xs text-emerald-700">
+                Waiter marks READY → SERVED.
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-orange-50 p-4">
+              <span className="text-xs font-bold text-orange-600">
+                04
+              </span>
+
+              <p className="mt-2 font-semibold text-orange-800">
+                Request Bill
+              </p>
+
+              <p className="mt-1 text-xs text-orange-700">
+                Waiter requests the bill.
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-blue-50 p-4">
+              <span className="text-xs font-bold text-blue-600">
+                05
+              </span>
+
+              <p className="mt-2 font-semibold text-blue-800">
+                Clean & Release
+              </p>
+
+              <p className="mt-1 text-xs text-blue-700">
+                After payment, clean and release.
               </p>
             </div>
           </div>
-        </div>
+        </section>
       </div>
-    </main>
+    </div>
   );
 }
