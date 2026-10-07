@@ -1,19 +1,19 @@
 "use client";
 
-import { FormEvent, Suspense, useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { FormEvent, Suspense, useEffect, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
+  CheckCircle2,
   Eye,
   EyeOff,
-  LockKeyhole,
+  Lock,
   ShieldCheck,
-  Loader2,
-  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 
 function SetupPasswordForm() {
   const searchParams = useSearchParams();
-  const router = useRouter();
 
   const token = searchParams.get("token");
 
@@ -21,22 +21,33 @@ function SetupPasswordForm() {
   const [confirmPassword, setConfirmPassword] = useState("");
 
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] =
-    useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
-  async function handleSubmit(
-    event: FormEvent<HTMLFormElement>
-  ) {
+  const [pageReady, setPageReady] = useState(false);
+
+  useEffect(() => {
+    setPageReady(true);
+  }, []);
+
+  const passwordLengthValid =
+    password.length >= 8 && password.length <= 128;
+
+  const passwordsMatch =
+    password.length > 0 &&
+    confirmPassword.length > 0 &&
+    password === confirmPassword;
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     setError("");
 
     if (!token) {
-      setError("Invalid password setup link.");
+      setError("This password setup link is invalid.");
       return;
     }
 
@@ -45,268 +56,397 @@ function SetupPasswordForm() {
       return;
     }
 
+    if (password.length > 128) {
+      setError("Password cannot exceed 128 characters.");
+      return;
+    }
+
     if (password !== confirmPassword) {
       setError("Passwords do not match.");
       return;
     }
 
-    setLoading(true);
-
     try {
-      const response = await fetch(
-        "/api/auth/setup-password",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            token,
-            password,
-          }),
-        }
-      );
+      setLoading(true);
+
+      const response = await fetch("/api/auth/setup-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          token,
+          password,
+        }),
+      });
 
       const data = await response.json();
 
-      if (!response.ok) {
+      if (!response.ok || !data.success) {
         setError(
-          data?.message ||
-            "Unable to create your password."
+          data.message ||
+            "Unable to create your password. Please try again."
         );
-        setLoading(false);
         return;
       }
 
       setSuccess(true);
-
-      setTimeout(() => {
-        router.push("/auth/login");
-      }, 2000);
+      setPassword("");
+      setConfirmPassword("");
     } catch (error) {
-      console.error("Password setup error:", error);
+      console.error("Password setup request failed:", error);
 
       setError(
-        "Something went wrong. Please try again."
+        "Something went wrong. Please check your connection and try again."
       );
-
+    } finally {
       setLoading(false);
     }
+  };
+
+  if (!pageReady) {
+    return null;
   }
+
+  // --------------------------------------------------
+  // SUCCESS SCREEN
+  // --------------------------------------------------
 
   if (success) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
-        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-            <CheckCircle2 size={28} />
+      <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 text-white">
+        <div className="w-full max-w-md">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-8 text-center shadow-2xl backdrop-blur-xl">
+            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full border border-emerald-500/20 bg-emerald-500/10">
+              <CheckCircle2
+                size={34}
+                className="text-emerald-400"
+              />
+            </div>
+
+            <h1 className="text-2xl font-semibold">
+              Password Created
+            </h1>
+
+            <p className="mt-3 text-sm leading-6 text-slate-400">
+              Your password has been created successfully.
+              <br />
+              You can now use your account to log in.
+            </p>
+
+            <Link
+              href="/auth/login"
+              className="mt-7 flex w-full items-center justify-center rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-200"
+            >
+              Go to Login
+            </Link>
           </div>
-
-          <h1 className="mt-6 text-2xl font-bold text-slate-900">
-            Password created
-          </h1>
-
-          <p className="mt-3 text-sm leading-6 text-slate-500">
-            Your password has been created successfully.
-            You can now log in to your Restova account.
-          </p>
-
-          <p className="mt-6 text-xs text-slate-400">
-            Redirecting to login...
-          </p>
         </div>
       </main>
     );
   }
 
+  // --------------------------------------------------
+  // INVALID TOKEN SCREEN
+  // --------------------------------------------------
+
+  if (!token) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 text-white">
+        <div className="w-full max-w-md">
+          <div className="rounded-2xl border border-red-500/20 bg-white/[0.04] p-8 text-center shadow-2xl backdrop-blur-xl">
+            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full border border-red-500/20 bg-red-500/10">
+              <XCircle
+                size={34}
+                className="text-red-400"
+              />
+            </div>
+
+            <h1 className="text-2xl font-semibold">
+              Invalid Setup Link
+            </h1>
+
+            <p className="mt-3 text-sm leading-6 text-slate-400">
+              This password setup link is missing or invalid.
+              <br />
+              Please use the setup link provided by your
+              administrator.
+            </p>
+
+            <Link
+              href="/auth/login"
+              className="mt-7 flex w-full items-center justify-center rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-200"
+            >
+              Go to Login
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // --------------------------------------------------
+  // SETUP PASSWORD SCREEN
+  // --------------------------------------------------
+
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6 py-12">
+    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10 text-white">
       <div className="w-full max-w-md">
+        {/* Logo / Brand */}
         <div className="mb-8 text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-white">
-            <span className="text-lg font-bold">R</span>
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-slate-950 shadow-xl">
+            <Lock size={25} />
           </div>
 
-          <h1 className="mt-6 text-2xl font-bold text-slate-900">
-            Set up your password
+          <h1 className="text-3xl font-bold tracking-tight">
+            Create Your Password
           </h1>
 
-          <p className="mt-3 text-sm leading-6 text-slate-500">
-            Create a secure password for your Restova
-            restaurant account.
+          <p className="mt-2 text-sm text-slate-400">
+            Set a secure password for your Restova account.
           </p>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-          {!token && (
-            <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              Invalid password setup link.
-            </div>
-          )}
+        {/* Card */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.04] shadow-2xl backdrop-blur-xl">
+          <div className="p-6 sm:p-8">
+            {/* Security message */}
+            <div className="mb-6 flex gap-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+              <ShieldCheck
+                size={20}
+                className="mt-0.5 shrink-0 text-cyan-400"
+              />
 
-          {error && (
-            <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {error}
-            </div>
-          )}
+              <div>
+                <p className="text-sm font-medium text-cyan-300">
+                  Secure account setup
+                </p>
 
-          <form
-            onSubmit={handleSubmit}
-            className="space-y-5"
-          >
-            <div>
-              <label
-                htmlFor="password"
-                className="mb-2 block text-sm font-medium text-slate-700"
-              >
-                New password
-              </label>
-
-              <div className="relative">
-                <LockKeyhole
-                  size={18}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
-                />
-
-                <input
-                  id="password"
-                  type={
-                    showPassword
-                      ? "text"
-                      : "password"
-                  }
-                  value={password}
-                  onChange={(event) =>
-                    setPassword(event.target.value)
-                  }
-                  placeholder="At least 8 characters"
-                  autoComplete="new-password"
-                  disabled={!token || loading}
-                  required
-                  className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-12 text-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 disabled:bg-slate-50"
-                />
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    setShowPassword(
-                      (value) => !value
-                    )
-                  }
-                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100"
-                  aria-label={
-                    showPassword
-                      ? "Hide password"
-                      : "Show password"
-                  }
-                >
-                  {showPassword ? (
-                    <EyeOff size={18} />
-                  ) : (
-                    <Eye size={18} />
-                  )}
-                </button>
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  Create a password with at least 8 characters.
+                  This setup link can only be used once.
+                </p>
               </div>
             </div>
 
-            <div>
-              <label
-                htmlFor="confirmPassword"
-                className="mb-2 block text-sm font-medium text-slate-700"
-              >
-                Confirm password
-              </label>
-
-              <div className="relative">
-                <LockKeyhole
-                  size={18}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
-                />
-
-                <input
-                  id="confirmPassword"
-                  type={
-                    showConfirmPassword
-                      ? "text"
-                      : "password"
-                  }
-                  value={confirmPassword}
-                  onChange={(event) =>
-                    setConfirmPassword(
-                      event.target.value
-                    )
-                  }
-                  placeholder="Enter password again"
-                  autoComplete="new-password"
-                  disabled={!token || loading}
-                  required
-                  className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-12 text-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 disabled:bg-slate-50"
-                />
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    setShowConfirmPassword(
-                      (value) => !value
-                    )
-                  }
-                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100"
-                  aria-label={
-                    showConfirmPassword
-                      ? "Hide password"
-                      : "Show password"
-                  }
-                >
-                  {showConfirmPassword ? (
-                    <EyeOff size={18} />
-                  ) : (
-                    <Eye size={18} />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={!token || loading}
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-slate-900 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            <form
+              onSubmit={handleSubmit}
+              className="space-y-5"
             >
-              {loading ? (
-                <>
-                  <Loader2
-                    size={18}
-                    className="animate-spin"
+              {/* Password */}
+              <div>
+                <label
+                  htmlFor="password"
+                  className="mb-2 block text-sm font-medium text-slate-200"
+                >
+                  Password
+                </label>
+
+                <div className="relative">
+                  <Lock
+                    size={17}
+                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500"
                   />
-                  Creating password...
-                </>
-              ) : (
-                <>
-                  <ShieldCheck size={18} />
-                  Create password
-                </>
+
+                  <input
+                    id="password"
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(event) =>
+                      setPassword(event.target.value)
+                    }
+                    placeholder="Enter your password"
+                    autoComplete="new-password"
+                    disabled={loading}
+                    className="w-full rounded-xl border border-white/10 bg-black/20 py-3 pl-10 pr-12 text-sm text-white outline-none placeholder:text-slate-600 transition focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setShowPassword((value) => !value)
+                    }
+                    disabled={loading}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 transition hover:text-slate-200"
+                    aria-label={
+                      showPassword
+                        ? "Hide password"
+                        : "Show password"
+                    }
+                  >
+                    {showPassword ? (
+                      <EyeOff size={18} />
+                    ) : (
+                      <Eye size={18} />
+                    )}
+                  </button>
+                </div>
+
+                {/* Password requirements */}
+                {password.length > 0 && (
+                  <div className="mt-2 flex items-center gap-2 text-xs">
+                    {passwordLengthValid ? (
+                      <>
+                        <CheckCircle2
+                          size={14}
+                          className="text-emerald-400"
+                        />
+
+                        <span className="text-emerald-400">
+                          Password length is valid
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <XCircle
+                          size={14}
+                          className="text-red-400"
+                        />
+
+                        <span className="text-red-400">
+                          Password must be 8–128 characters
+                        </span>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Confirm Password */}
+              <div>
+                <label
+                  htmlFor="confirmPassword"
+                  className="mb-2 block text-sm font-medium text-slate-200"
+                >
+                  Confirm Password
+                </label>
+
+                <div className="relative">
+                  <Lock
+                    size={17}
+                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500"
+                  />
+
+                  <input
+                    id="confirmPassword"
+                    name="confirmPassword"
+                    type={
+                      showConfirmPassword
+                        ? "text"
+                        : "password"
+                    }
+                    value={confirmPassword}
+                    onChange={(event) =>
+                      setConfirmPassword(event.target.value)
+                    }
+                    placeholder="Confirm your password"
+                    autoComplete="new-password"
+                    disabled={loading}
+                    className="w-full rounded-xl border border-white/10 bg-black/20 py-3 pl-10 pr-12 text-sm text-white outline-none placeholder:text-slate-600 transition focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setShowConfirmPassword(
+                        (value) => !value
+                      )
+                    }
+                    disabled={loading}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 transition hover:text-slate-200"
+                    aria-label={
+                      showConfirmPassword
+                        ? "Hide confirm password"
+                        : "Show confirm password"
+                    }
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff size={18} />
+                    ) : (
+                      <Eye size={18} />
+                    )}
+                  </button>
+                </div>
+
+                {confirmPassword.length > 0 && (
+                  <div className="mt-2 flex items-center gap-2 text-xs">
+                    {passwordsMatch ? (
+                      <>
+                        <CheckCircle2
+                          size={14}
+                          className="text-emerald-400"
+                        />
+
+                        <span className="text-emerald-400">
+                          Passwords match
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <XCircle
+                          size={14}
+                          className="text-red-400"
+                        />
+
+                        <span className="text-red-400">
+                          Passwords do not match
+                        </span>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Error */}
+              {error && (
+                <div className="flex gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-4">
+                  <XCircle
+                    size={19}
+                    className="mt-0.5 shrink-0 text-red-400"
+                  />
+
+                  <p className="text-sm leading-5 text-red-300">
+                    {error}
+                  </p>
+                </div>
               )}
-            </button>
-          </form>
 
-          <p className="mt-6 text-center text-xs leading-5 text-slate-400">
-            This setup link is temporary and can only be
-            used once.
-          </p>
+              {/* Submit */}
+              <button
+                type="submit"
+                disabled={
+                  loading ||
+                  !passwordLengthValid ||
+                  !passwordsMatch
+                }
+                className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {loading
+                  ? "Creating Password..."
+                  : "Create Password"}
+              </button>
+            </form>
+          </div>
+
+          {/* Footer */}
+          <div className="border-t border-white/10 px-6 py-4 text-center sm:px-8">
+            <p className="text-xs text-slate-500">
+              Having trouble with your setup link?
+            </p>
+
+            <Link
+              href="/auth/login"
+              className="mt-1 inline-block text-xs font-medium text-cyan-400 transition hover:text-cyan-300"
+            >
+              Return to login
+            </Link>
+          </div>
         </div>
-      </div>
-    </main>
-  );
-}
 
-function SetupPasswordLoading() {
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
-      <div className="flex items-center gap-2 text-sm text-slate-500">
-        <Loader2
-          size={18}
-          className="animate-spin"
-        />
-        Loading password setup...
+        <p className="mt-6 text-center text-xs text-slate-600">
+          © {new Date().getFullYear()} Restova. All rights reserved.
+        </p>
       </div>
     </main>
   );
@@ -314,7 +454,19 @@ function SetupPasswordLoading() {
 
 export default function SetupPasswordPage() {
   return (
-    <Suspense fallback={<SetupPasswordLoading />}>
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 text-white">
+          <div className="text-center">
+            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+
+            <p className="mt-4 text-sm text-slate-400">
+              Loading secure setup...
+            </p>
+          </div>
+        </main>
+      }
+    >
       <SetupPasswordForm />
     </Suspense>
   );
