@@ -22,5 +22,9 @@ export default async function SuperAdminLayout({
     redirect("/auth/login");
   }
 
-  return <SuperAdminShell>{children}</SuperAdminShell>;
+  return (
+    <SuperAdminShell>
+      {children}
+    </SuperAdminShell>
+  );
 }
