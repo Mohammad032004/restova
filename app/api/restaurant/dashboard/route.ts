@@ -7,7 +7,10 @@ import Order from "@/models/order";
 import Table from "@/models/table";
 import Restaurant from "@/models/restaurant";
 
-const ALLOWED_ROLES = ["RESTAURANT_OWNER", "MANAGER"];
+const ALLOWED_ROLES = [
+  "RESTAURANT_OWNER",
+  "MANAGER",
+];
 
 export async function GET() {
   try {
@@ -35,7 +38,8 @@ export async function GET() {
       return NextResponse.json(
         {
           success: false,
-          message: "You do not have permission to access this dashboard.",
+          message:
+            "You do not have permission to access this dashboard.",
         },
         { status: 403 }
       );
@@ -51,7 +55,8 @@ export async function GET() {
       return NextResponse.json(
         {
           success: false,
-          message: "Your account is not associated with a restaurant.",
+          message:
+            "Your account is not associated with a restaurant.",
         },
         { status: 400 }
       );
@@ -67,7 +72,9 @@ export async function GET() {
     // 5. Verify restaurant
     // --------------------------------------------------
 
-    const restaurant = await Restaurant.findById(restaurantId)
+    const restaurant = await Restaurant.findById(
+      restaurantId
+    )
       .select("_id name type status")
       .lean();
 
@@ -85,7 +92,8 @@ export async function GET() {
       return NextResponse.json(
         {
           success: false,
-          message: "This restaurant is currently suspended.",
+          message:
+            "This restaurant is currently suspended.",
         },
         { status: 403 }
       );
@@ -94,29 +102,34 @@ export async function GET() {
     // --------------------------------------------------
     // 6. Today's date
     //
-    // Restova is currently being developed for India,
-    // so dashboard day boundaries use Asia/Kolkata.
+    // Restova currently uses Asia/Kolkata for
+    // restaurant dashboard day boundaries.
     // --------------------------------------------------
 
     const now = new Date();
 
-    const indiaDateFormatter = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Kolkata",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
+    const indiaDateFormatter = new Intl.DateTimeFormat(
+      "en-CA",
+      {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }
+    );
 
     const today = indiaDateFormatter.format(now);
 
-    const startOfDay = new Date(`${today}T00:00:00+05:30`);
+    const startOfDay = new Date(
+      `${today}T00:00:00+05:30`
+    );
+
     const startOfTomorrow = new Date(
-      new Date(`${today}T00:00:00+05:30`).getTime() +
-        24 * 60 * 60 * 1000
+      startOfDay.getTime() + 24 * 60 * 60 * 1000
     );
 
     // --------------------------------------------------
-    // 7. Today's orders
+    // 7. Today's order filter
     // --------------------------------------------------
 
     const todayOrderFilter = {
@@ -130,8 +143,10 @@ export async function GET() {
     // --------------------------------------------------
     // 8. Today's sales
     //
-    // Sales = PAID orders.
-    // Cancelled/refunded payments are not counted.
+    // Sales are PAID orders.
+    //
+    // Cancelled orders are excluded.
+    // Refunded orders cannot match paymentStatus: PAID.
     // --------------------------------------------------
 
     const salesResult = await Order.aggregate([
@@ -157,7 +172,7 @@ export async function GET() {
     const todaySales = salesResult[0]?.total || 0;
 
     // --------------------------------------------------
-    // 9. Order statistics
+    // 9. Today's order statistics
     // --------------------------------------------------
 
     const [
@@ -166,8 +181,10 @@ export async function GET() {
       completedOrders,
       cancelledOrders,
     ] = await Promise.all([
+      // All orders received today
       Order.countDocuments(todayOrderFilter),
 
+      // Orders that still require operational attention
       Order.countDocuments({
         ...todayOrderFilter,
         status: {
@@ -181,11 +198,13 @@ export async function GET() {
         },
       }),
 
+      // Completed orders
       Order.countDocuments({
         ...todayOrderFilter,
         status: "COMPLETED",
       }),
 
+      // Cancelled orders
       Order.countDocuments({
         ...todayOrderFilter,
         status: "CANCELLED",
@@ -285,17 +304,25 @@ export async function GET() {
 
         recentOrders,
       },
-      { status: 200 }
+      {
+        status: 200,
+      }
     );
   } catch (error) {
-    console.error("Restaurant dashboard error:", error);
+    console.error(
+      "Restaurant dashboard error:",
+      error
+    );
 
     return NextResponse.json(
       {
         success: false,
-        message: "Failed to load restaurant dashboard.",
+        message:
+          "Failed to load restaurant dashboard.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
