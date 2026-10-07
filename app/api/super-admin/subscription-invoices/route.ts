@@ -3,9 +3,11 @@ import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/auth";
 import { connectDB } from "@/lib/mongodb";
+
 import Restaurant from "@/models/restaurant";
 import RestaurantSubscription from "@/models/restaurant-subscription";
 import SubscriptionInvoice from "@/models/subscription-invoice";
+import SubscriptionPlan from "@/models/subscription-plan";
 
 type AuthResult =
   | {
@@ -50,7 +52,7 @@ async function requireSuperAdmin(): Promise<AuthResult> {
   };
 }
 
-function generateInvoiceNumber() {
+function generateInvoiceNumber(): string {
   const date = new Date();
 
   const year = date.getFullYear();
@@ -77,30 +79,47 @@ export async function GET() {
     const invoices = await SubscriptionInvoice.find()
       .populate({
         path: "restaurantId",
-        select: "name type city state status",
+        model: Restaurant,
+        select: "name type city state status numberOfTables",
       })
       .populate({
         path: "subscriptionId",
-        select: "status startDate endDate billingCycle price planId",
+        model: RestaurantSubscription,
+        select:
+          "status startDate endDate billingCycle price autoRenew planId",
         populate: {
           path: "planId",
-          select: "name billingCycle",
+          model: SubscriptionPlan,
+          select:
+            "name description price billingCycle features maxTables maxStaff isActive",
         },
       })
       .sort({ createdAt: -1 })
       .lean();
 
-    return NextResponse.json({
-      success: true,
-      invoices,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        invoices,
+      },
+      { status: 200 }
+    );
   } catch (error) {
-    console.error("Get subscription invoices error:", error);
+    console.error(
+      "========== GET SUBSCRIPTION INVOICES ERROR =========="
+    );
+    console.error(error);
+    console.error(
+      "======================================================"
+    );
 
     return NextResponse.json(
       {
         success: false,
-        message: "Failed to load subscription invoices.",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to load subscription invoices.",
       },
       { status: 500 }
     );
@@ -158,8 +177,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message:
-            "Amount must be a valid non-negative number.",
+          message: "Amount must be a valid non-negative number.",
         },
         { status: 400 }
       );
@@ -268,15 +286,20 @@ export async function POST(request: Request) {
       )
         .populate({
           path: "restaurantId",
-          select: "name type city state status",
+          model: Restaurant,
+          select:
+            "name type city state status numberOfTables",
         })
         .populate({
           path: "subscriptionId",
+          model: RestaurantSubscription,
           select:
-            "status startDate endDate billingCycle price planId",
+            "status startDate endDate billingCycle price autoRenew planId",
           populate: {
             path: "planId",
-            select: "name billingCycle",
+            model: SubscriptionPlan,
+            select:
+              "name description price billingCycle features maxTables maxStaff isActive",
           },
         })
         .lean();
@@ -300,7 +323,9 @@ export async function POST(request: Request) {
       {
         success: false,
         message:
-          "Failed to create subscription invoice.",
+          error instanceof Error
+            ? error.message
+            : "Failed to create subscription invoice.",
       },
       { status: 500 }
     );
